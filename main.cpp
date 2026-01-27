@@ -36,9 +36,9 @@ static std::deque<UploadTask> upload_tasks;
 static std::map<int, UploadStatus> upload_status_map;
 static std::mutex upload_mutex;
 static std::condition_variable upload_cv;
-static std::atomic<int> next_upload_id{1};
+static std::atomic<int> next_upload_id{ 1 };
 static std::thread upload_worker_thread;
-static std::atomic<bool> workers_stop{false};
+static std::atomic<bool> workers_stop{ false };
 
 // Delete worker structures
 struct DeleteTask { std::string remote; bool is_dir; };
@@ -62,7 +62,7 @@ int main()
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 
-    GLFWwindow *window = glfwCreateWindow(1280, 800, "SMB Browser Linux", NULL, NULL);
+    GLFWwindow* window = glfwCreateWindow(1280, 800, "SMB Browser Linux", NULL, NULL);
     glfwMakeContextCurrent(window);
     glfwSwapInterval(1);
     glewInit(); // NO CHECK - just call it like before
@@ -71,446 +71,451 @@ int main()
 
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
-    ImGuiIO &io = ImGui::GetIO();
+    ImGuiIO& io = ImGui::GetIO();
     (void)io;
     ImGui::StyleColorsDark();
     ImGui_ImplGlfw_InitForOpenGL(window, true);
     // Receive OS file drops (first path) and mark upload ready
-    glfwSetDropCallback(window, [](GLFWwindow * /*w*/, int count, const char **paths)
-                        {
-        if (count > 0 && paths) {
-            for (int i = 0; i < count; ++i) {
-                if (!paths[i]) continue;
-                upload_queue.push_back(paths[i]);
-                printf("[DROP DEBUG] GLFW drop queued: %s\n", paths[i]);
-            }
-            upload_ready = !upload_queue.empty();
-        } });
-    ImGui_ImplOpenGL3_Init("#version 330");
+    glfwSetDropCallback(window, [](GLFWwindow* /*w*/, int count, const char** paths)
+        {
+            if (count > 0 && paths) {
+                for (int i = 0; i < count; ++i) {
+                    if (!paths[i]) continue;
+                    upload_queue.push_back(paths[i]);
+                    printf("[DROP DEBUG] GLFW drop queued: %s\n", paths[i]);
+                }
+                upload_ready = !upload_queue.empty();
+            } });
+            ImGui_ImplOpenGL3_Init("#version 330");
 
-    // Start upload worker
-    upload_worker_thread = std::thread([](){
-        while (!workers_stop) {
-            UploadTask task;
-            {
-                std::unique_lock<std::mutex> lk(upload_mutex);
-                upload_cv.wait(lk, []{return workers_stop || !upload_tasks.empty();});
-                if (workers_stop) break;
-                task = upload_tasks.front();
-                upload_tasks.pop_front();
-            }
+            // Start upload worker
+            upload_worker_thread = std::thread([]() {
+                while (!workers_stop) {
+                    UploadTask task;
+                    {
+                        std::unique_lock<std::mutex> lk(upload_mutex);
+                        upload_cv.wait(lk, [] {return workers_stop || !upload_tasks.empty(); });
+                        if (workers_stop) break;
+                        task = upload_tasks.front();
+                        upload_tasks.pop_front();
+                    }
 
-            // mark status (guarded)
-            {
-                std::lock_guard<std::mutex> lk(upload_mutex);
-                auto &st = upload_status_map[task.id];
-                st.id = task.id; st.local = task.local; st.remote = task.remote; st.transferred = 0; st.total = task.total_bytes; st.done = false; st.success = false;
-            }
+                    // mark status (guarded)
+                    {
+                        std::lock_guard<std::mutex> lk(upload_mutex);
+                        auto& st = upload_status_map[task.id];
+                        st.id = task.id; st.local = task.local; st.remote = task.remote; st.transferred = 0; st.total = task.total_bytes; st.done = false; st.success = false;
+                    }
 
-            // perform upload with progress callback
-            bool ok = UploadFileWithProgress(server_buf, share_buf, task.remote, task.local, username_buf, password_buf,
-                [&](ssize_t written){
-                    std::lock_guard<std::mutex> lk(upload_mutex);
-                    auto it = upload_status_map.find(task.id);
-                    if (it != upload_status_map.end()) it->second.transferred += (size_t)written;
+                    // perform upload with progress callback
+                    bool ok = UploadFileWithProgress(server_buf, share_buf, task.remote, task.local, username_buf, password_buf,
+                        [&](ssize_t written) {
+                            std::lock_guard<std::mutex> lk(upload_mutex);
+                            auto it = upload_status_map.find(task.id);
+                            if (it != upload_status_map.end()) it->second.transferred += (size_t)written;
+                        });
+
+                    {
+                        std::lock_guard<std::mutex> lk(upload_mutex);
+                        auto it = upload_status_map.find(task.id);
+                        if (it != upload_status_map.end()) { it->second.done = true; it->second.success = ok; }
+                    }
+                }
                 });
 
-            {
-                std::lock_guard<std::mutex> lk(upload_mutex);
-                auto it = upload_status_map.find(task.id);
-                if (it != upload_status_map.end()) { it->second.done = true; it->second.success = ok; }
-            }
-        }
-    });
-
-    // Start delete worker
-    delete_worker_thread = std::thread([](){
-        while (!workers_stop) {
-            DeleteTask dt;
-            {
-                std::unique_lock<std::mutex> lk(delete_mutex);
-                delete_cv.wait(lk, []{return workers_stop || !delete_tasks.empty();});
-                if (workers_stop) break;
-                dt = delete_tasks.front(); delete_tasks.pop_front();
-            }
-            // perform delete (recursive)
-            DeleteRecursive(server_buf, share_buf, dt.remote, username_buf, password_buf);
-        }
-    });
-
-    while (!glfwWindowShouldClose(window))
-    {
-        glfwPollEvents();
-        ImGui_ImplOpenGL3_NewFrame();
-        ImGui_ImplGlfw_NewFrame();
-        ImGui::NewFrame();
-
-        if (ImGui::CollapsingHeader("SMB Browser"))
-        {
-            ImGui::InputText("Server", server_buf, 64);
-            ImGui::InputText("Share", share_buf, 64);
-            ImGui::InputText("Username", username_buf, 64);
-            ImGui::InputText("Password", password_buf, 64, ImGuiInputTextFlags_Password);
-
-            if (ImGui::Button("Connect"))
-            {
-                strncpy(current_path, "", sizeof(current_path) - 1);
-                file_list = ListSMBFiles(server_buf, share_buf, "", username_buf, password_buf);
-                printf("Connected, found %zu files\n", file_list.size());
-            }
-
-            if (ImGui::Button("Back") && strlen(current_path) > 0)
-            {
-                char *last_slash = strrchr(current_path, '/');
-                if (last_slash && last_slash > current_path)
-                    *last_slash = 0;
-                file_list = ListSMBFiles(server_buf, share_buf, current_path, username_buf, password_buf);
-            }
-
-            ImGui::SameLine();
-            ImGui::Text("Current: %s", current_path);
-
-            // DRAG & DROP ZONE WITH DEBUG
-            ImGui::Separator();
-
-            if (ImGui::BeginChild("DropZone", ImVec2(0, 80), true))
-            {
-                ImGui::Text("DRAG FILES HERE");
-
-                if (ImGui::BeginDragDropTarget())
-                {
-                    printf("[DROP DEBUG] BeginDragDropTarget() = TRUE\n");
-                    const ImGuiPayload *payload = ImGui::AcceptDragDropPayload("Files");
-                    if (payload && payload->Data && payload->DataSize > 0)
+            // Start delete worker
+            delete_worker_thread = std::thread([]() {
+                while (!workers_stop) {
+                    DeleteTask dt;
                     {
-                        const char *path = (const char *)payload->Data;
-                        printf("[DROP DEBUG] PAYLOAD PATH DETECTED: '%s'\n", path);
-                        upload_queue.push_back(std::string(path));
-                        upload_ready = !upload_queue.empty();
+                        std::unique_lock<std::mutex> lk(delete_mutex);
+                        delete_cv.wait(lk, [] {return workers_stop || !delete_tasks.empty(); });
+                        if (workers_stop) break;
+                        dt = delete_tasks.front(); delete_tasks.pop_front();
                     }
-                    ImGui::EndDragDropTarget();
+                    // perform delete (recursive)
+                    DeleteRecursive(server_buf, share_buf, dt.remote, username_buf, password_buf);
                 }
-            }
-            ImGui::EndChild();
+                });
 
-            // Always show staged deletes so user can undo even when not uploading
-            if (!staged_deletes.empty()) {
-                ImGui::Separator();
-                ImGui::Text("Staged deletes:");
-                for (size_t i = 0; i < staged_deletes.size(); ++i) {
-                    ImGui::Text("%zu: %s -> %s", i+1, staged_deletes[i].original.c_str(), staged_deletes[i].temp.c_str());
-                }
-                ImGui::SameLine();
-                if (ImGui::Button("Undo Last Delete")) {
-                    auto sd = staged_deletes.back();
+            while (!glfwWindowShouldClose(window))
+            {
+                glfwPollEvents();
+                ImGui_ImplOpenGL3_NewFrame();
+                ImGui_ImplGlfw_NewFrame();
+                ImGui::NewFrame();
 
-                    bool moved_back = MoveRemote(server_buf, share_buf, sd.temp, sd.original, username_buf, password_buf);
-                    if (moved_back) {
-                        staged_deletes.pop_back();
+                if (ImGui::CollapsingHeader("SMB Browser"))
+                {
+                    ImGui::InputText("Server", server_buf, 64);
+                    ImGui::InputText("Share", share_buf, 64);
+                    ImGui::InputText("Username", username_buf, 64);
+                    ImGui::InputText("Password", password_buf, 64, ImGuiInputTextFlags_Password);
+
+                    if (ImGui::Button("Connect"))
+                    {
+                        strncpy(current_path, "", sizeof(current_path) - 1);
+                        file_list = ListSMBFiles(server_buf, share_buf, "", username_buf, password_buf);
+                        printf("Connected, found %zu files\n", file_list.size());
+                    }
+
+                    if (ImGui::Button("Back") && strlen(current_path) > 0)
+                    {
+                        char* last_slash = strrchr(current_path, '/');
+                        if (last_slash && last_slash > current_path)
+                            *last_slash = 0;
                         file_list = ListSMBFiles(server_buf, share_buf, current_path, username_buf, password_buf);
-                        printf("UNDO: moved back '%s' -> '%s'\n", sd.temp.c_str(), sd.original.c_str());
-                    } else {
-                        printf("UNDO FAILED for '%s'\n", sd.temp.c_str());
                     }
-                }
-                ImGui::SameLine();
-                if (ImGui::Button("Empty Trash")) {
-                    // commit staged deletes to background worker
-                    std::lock_guard<std::mutex> lk(delete_mutex);
-                    for (const auto &sd : staged_deletes) delete_tasks.push_back({sd.temp, sd.is_dir});
-                    if (!staged_deletes.empty()) delete_cv.notify_one();
-                    staged_deletes.clear();
-                    file_list = ListSMBFiles(server_buf, share_buf, current_path, username_buf, password_buf);
-                    printf("EMPTY TRASH: committed staged deletes to worker\n");
-                }
-            }
 
-            if (upload_ready && (!upload_queue.empty() || strlen(local_file_buf) > 0))
-            {
-                ImGui::Separator();
-
-
-                if (!upload_queue.empty())
-                {
-                    ImGui::Text("Queued for upload:");
-                    for (size_t i = 0; i < upload_queue.size(); ++i)
-                    {
-                        ImGui::Text("%zu: %s", i + 1, upload_queue[i].c_str());
-                        ImGui::SameLine();
-                        char lbl[64];
-                        sprintf(lbl, "Remove##%zu", i);
-                        if (ImGui::SmallButton(lbl))
-                        {
-                            upload_queue.erase(upload_queue.begin() + i);
-                            break;
-                        }
-                    }
-                }
-
-
-                
-
-                // If a lone local_file_buf exists (back-compat), let user add it to queue
-                if (strlen(local_file_buf) > 0 && upload_queue.empty())
-                {
-                    ImGui::TextColored(ImVec4(0, 1, 0, 1), "READY: %s", local_file_buf);
                     ImGui::SameLine();
-                    if (ImGui::Button("Add to Queue"))
-                    {
-                        upload_queue.push_back(std::string(local_file_buf));
-                        local_file_buf[0] = 0;
-                    }
-                }
+                    ImGui::Text("Current: %s", current_path);
 
-                // Upload all queued files
-                if (!upload_queue.empty())
-                {
-                    ImGui::SameLine();
-                    if (ImGui::Button("Upload All"))
+                    // DRAG & DROP ZONE WITH DEBUG
+                    ImGui::Separator();
+
+                    if (ImGui::BeginChild("DropZone", ImVec2(0, 80), true))
                     {
-                        printf("UPLOAD ALL CLICKED (%zu files)\n", upload_queue.size());
-                        for (const auto &localPath : upload_queue)
+                        ImGui::Text("DRAG FILES HERE");
+
+                        if (ImGui::BeginDragDropTarget())
                         {
-                            // build remote path
-                            std::string full_remote = std::string(current_path);
-                            if (strlen(current_path) > 0 && current_path[0])
-                                full_remote += "/";
-
-                            const char *lp = localPath.c_str();
-                            const char *filename_slash = strrchr(lp, '/');
-                            const char *filename_back = strrchr(lp, '\\');
-                            const char *filename = filename_slash;
-                            if (!filename || (filename_back && filename_back > filename))
-                                filename = filename_back;
-                            if (!filename)
-                                filename = lp;
-                            else
-                                filename++;
-                            full_remote += filename;
-
-                            printf("ENQUEUE UPLOAD -> smb://%s/%s/%s\n", server_buf, share_buf, full_remote.c_str());
-                            // compute file size
-                            size_t fsize = 0;
-                            try { fsize = (size_t)std::filesystem::file_size(localPath); } catch(...) { fsize = 0; }
-                            int id = next_upload_id.fetch_add(1);
+                            printf("[DROP DEBUG] BeginDragDropTarget() = TRUE\n");
+                            const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("Files");
+                            if (payload && payload->Data && payload->DataSize > 0)
                             {
-                                std::lock_guard<std::mutex> lk(upload_mutex);
-                                upload_tasks.push_back({id, localPath, full_remote, fsize});
-                                upload_status_map[id] = {id, localPath, full_remote, 0, fsize, false, false};
+                                const char* path = (const char*)payload->Data;
+                                printf("[DROP DEBUG] PAYLOAD PATH DETECTED: '%s'\n", path);
+                                upload_queue.push_back(std::string(path));
+                                upload_ready = !upload_queue.empty();
                             }
-                            upload_cv.notify_one();
+                            ImGui::EndDragDropTarget();
                         }
-                        // refresh listing after all attempts
-                        file_list = ListSMBFiles(server_buf, share_buf, current_path, username_buf, password_buf);
-                        upload_queue.clear();
-                        upload_ready = false;
+                    }
+                    ImGui::EndChild();
+
+                    // Always show staged deletes so user can undo even when not uploading
+                    if (!staged_deletes.empty()) {
+                        ImGui::Separator();
+                        ImGui::Text("Staged deletes:");
+                        for (size_t i = 0; i < staged_deletes.size(); ++i) {
+                            ImGui::Text("%zu: %s -> %s", i + 1, staged_deletes[i].original.c_str(), staged_deletes[i].temp.c_str());
+                        }
+                        ImGui::SameLine();
+                        if (ImGui::Button("Undo Last Delete")) {
+                            auto sd = staged_deletes.back();
+
+                            bool moved_back = MoveRemote(server_buf, share_buf, sd.temp, sd.original, username_buf, password_buf);
+                            if (moved_back) {
+                                staged_deletes.pop_back();
+                                file_list = ListSMBFiles(server_buf, share_buf, current_path, username_buf, password_buf);
+                                printf("UNDO: moved back '%s' -> '%s'\n", sd.temp.c_str(), sd.original.c_str());
+                            }
+                            else {
+                                printf("UNDO FAILED for '%s'\n", sd.temp.c_str());
+                            }
+                        }
+                        ImGui::SameLine();
+                        if (ImGui::Button("Empty Trash")) {
+                            // commit staged deletes to background worker
+                            std::lock_guard<std::mutex> lk(delete_mutex);
+                            for (const auto& sd : staged_deletes) delete_tasks.push_back({ sd.temp, sd.is_dir });
+                            if (!staged_deletes.empty()) delete_cv.notify_one();
+                            staged_deletes.clear();
+                            file_list = ListSMBFiles(server_buf, share_buf, current_path, username_buf, password_buf);
+                            printf("EMPTY TRASH: committed staged deletes to worker\n");
+                        }
+                    }
+
+                    if (upload_ready && (!upload_queue.empty() || strlen(local_file_buf) > 0))
+                    {
+                        ImGui::Separator();
+
+
+                        if (!upload_queue.empty())
+                        {
+                            ImGui::Text("Queued for upload:");
+                            for (size_t i = 0; i < upload_queue.size(); ++i)
+                            {
+                                ImGui::Text("%zu: %s", i + 1, upload_queue[i].c_str());
+                                ImGui::SameLine();
+                                char lbl[64];
+                                sprintf(lbl, "Remove##%zu", i);
+                                if (ImGui::SmallButton(lbl))
+                                {
+                                    upload_queue.erase(upload_queue.begin() + i);
+                                    break;
+                                }
+                            }
+                        }
+
+
+
+
+                        // If a lone local_file_buf exists (back-compat), let user add it to queue
+                        if (strlen(local_file_buf) > 0 && upload_queue.empty())
+                        {
+                            ImGui::TextColored(ImVec4(0, 1, 0, 1), "READY: %s", local_file_buf);
+                            ImGui::SameLine();
+                            if (ImGui::Button("Add to Queue"))
+                            {
+                                upload_queue.push_back(std::string(local_file_buf));
+                                local_file_buf[0] = 0;
+                            }
+                        }
+
+                        // Upload all queued files
+                        if (!upload_queue.empty())
+                        {
+                            ImGui::SameLine();
+                            if (ImGui::Button("Upload All"))
+                            {
+                                printf("UPLOAD ALL CLICKED (%zu files)\n", upload_queue.size());
+                                for (const auto& localPath : upload_queue)
+                                {
+                                    // build remote path
+                                    std::string full_remote = std::string(current_path);
+                                    if (strlen(current_path) > 0 && current_path[0])
+                                        full_remote += "/";
+
+                                    const char* lp = localPath.c_str();
+                                    const char* filename_slash = strrchr(lp, '/');
+                                    const char* filename_back = strrchr(lp, '\\');
+                                    const char* filename = filename_slash;
+                                    if (!filename || (filename_back && filename_back > filename))
+                                        filename = filename_back;
+                                    if (!filename)
+                                        filename = lp;
+                                    else
+                                        filename++;
+                                    full_remote += filename;
+
+                                    printf("ENQUEUE UPLOAD -> smb://%s/%s/%s\n", server_buf, share_buf, full_remote.c_str());
+                                    // compute file size
+                                    size_t fsize = 0;
+                                    try { fsize = (size_t)std::filesystem::file_size(localPath); }
+                                    catch (...) { fsize = 0; }
+                                    int id = next_upload_id.fetch_add(1);
+                                    {
+                                        std::lock_guard<std::mutex> lk(upload_mutex);
+                                        upload_tasks.push_back({ id, localPath, full_remote, fsize });
+                                        upload_status_map[id] = { id, localPath, full_remote, 0, fsize, false, false };
+                                    }
+                                    upload_cv.notify_one();
+                                }
+                                // refresh listing after all attempts
+                                file_list = ListSMBFiles(server_buf, share_buf, current_path, username_buf, password_buf);
+                                upload_queue.clear();
+                                upload_ready = false;
+                            }
+                        }
+
+                        // Active uploads
+                        if (!upload_status_map.empty()) {
+                            ImGui::Separator();
+                            ImGui::Text("Active uploads:");
+                            std::lock_guard<std::mutex> lk(upload_mutex);
+                            for (auto& p : upload_status_map) {
+                                auto& st = p.second;
+                                float frac = 0.0f;
+                                if (st.total > 0) frac = (float)st.transferred / (float)st.total;
+                                ImGui::Text("%s", st.local.c_str());
+                                ImGui::ProgressBar(frac, ImVec2(-1, 0));
+                                if (st.done) ImGui::Text(st.success ? "Done" : "Failed");
+                            }
+                        }
+                    }
+
+                    if (!file_list.empty())
+                    {
+                        ImGui::BeginChild("FileList", ImVec2(0, 200), true);
+                        // two columns: name and actions
+                        ImGui::Columns(2, "files_cols", false);
+                        ImGui::SetColumnWidth(1, 120);
+                        for (size_t idx = 0; idx < file_list.size(); ++idx)
+                        {
+                            const auto& file = file_list[idx];
+                            std::string label = (file.is_dir ? "[DIR] " : "[FILE] ") + file.name;
+
+                            ImGui::PushID((int)idx);
+                            // name column: selectable
+                            if (ImGui::Selectable(label.c_str(), false, 0, ImVec2(0, 0)))
+                            {
+                                if (!file.is_dir)
+                                {
+                                    std::string full_remote = std::string(current_path);
+                                    if (strlen(current_path) > 0 && current_path[0])
+                                        full_remote += "/";
+                                    full_remote += file.name;
+                                    DownloadFile(server_buf, share_buf, full_remote,
+                                        file.name.c_str(), username_buf, password_buf);
+                                }
+                                else
+                                {
+                                    std::string new_path = std::string(current_path);
+                                    if (strlen(current_path) > 0 && current_path[0])
+                                        new_path += "/";
+                                    new_path += file.name;
+                                    strncpy(current_path, new_path.c_str(), sizeof(current_path) - 1);
+                                    file_list = ListSMBFiles(server_buf, share_buf, current_path,
+                                        username_buf, password_buf);
+                                }
+                            }
+                            ImGui::NextColumn();
+
+                            // actions column: delete button
+                            char delbtn[64];
+                            sprintf(delbtn, "Delete##%zu", idx);
+                            if (ImGui::SmallButton(delbtn))
+                            {
+                                std::string full_remote = std::string(current_path);
+                                if (strlen(current_path) > 0 && current_path[0])
+                                    full_remote += "/";
+                                full_remote += file.name;
+
+                                // For both files and directories show confirmation popup
+                                pending_delete_remote = full_remote;
+                                pending_delete_is_dir = file.is_dir;
+                                pending_delete_open_popup = true;
+                            }
+                            else {
+                                // no-op
+                            }
+
+                            // (end SmallButton handling)
+                            ImGui::PopID();
+                            ImGui::NextColumn();
+                        }
+
+                        if (pending_delete_open_popup) {
+                            ImGui::OpenPopup("Confirm Delete");
+                            pending_delete_open_popup = false;
+                        }
+                        if (ImGui::BeginPopupModal("Confirm Delete", NULL, ImGuiWindowFlags_AlwaysAutoResize))
+                        {
+                            ImGui::Text("Delete directory '%s' and ALL its contents?", pending_delete_remote.c_str());
+                            ImGui::Separator();
+                            if (ImGui::Button("OK", ImVec2(120, 0)))
+                            {
+                                // If there are staged deletes already, commit them first for file-delete path
+                                if (!pending_delete_is_dir) {
+                                    if (!staged_deletes.empty()) {
+                                        std::lock_guard<std::mutex> lk(delete_mutex);
+                                        for (const auto& sd : staged_deletes) delete_tasks.push_back({ sd.temp, sd.is_dir });
+                                        delete_cv.notify_one();
+                                        staged_deletes.clear();
+                                    }
+
+                                    // Stage single file delete via rename
+                                    time_t t = time(NULL);
+                                    // extract base name
+                                    std::string name_only = pending_delete_remote;
+                                    size_t pos = name_only.find_last_of('/');
+                                    if (pos != std::string::npos) name_only = name_only.substr(pos + 1);
+                                    // sanitize
+                                    while (!name_only.empty() && name_only[0] == '.') name_only.erase(0, 1);
+                                    const std::string del_prefix = "deleted_";
+                                    while (name_only.rfind(del_prefix, 0) == 0) {
+                                        size_t after = del_prefix.size();
+                                        size_t next_us = name_only.find('_', after);
+                                        if (next_us == std::string::npos) break;
+                                        name_only.erase(0, next_us + 1);
+                                        while (!name_only.empty() && name_only[0] == '.') name_only.erase(0, 1);
+                                    }
+                                    char tmpname[512];
+                                    snprintf(tmpname, sizeof(tmpname), ".deleted_%ld_%s", (long)t, name_only.c_str());
+                                    std::string temp_remote = std::string(".") + std::string(tmpname);
+
+                                    printf("STAGE DELETE: rename '%s' -> '%s'\n", pending_delete_remote.c_str(), temp_remote.c_str());
+                                    bool moved = MoveRemote(server_buf, share_buf, pending_delete_remote, temp_remote, username_buf, password_buf);
+                                    if (moved) {
+                                        staged_deletes.push_back({ pending_delete_remote, temp_remote, false });
+                                        file_list = ListSMBFiles(server_buf, share_buf, current_path, username_buf, password_buf);
+                                    }
+                                    else {
+                                        printf("STAGE DELETE FAILED for '%s'\n", pending_delete_remote.c_str());
+                                    }
+                                }
+                                else {
+                                    // Directory delete path (existing behavior)
+                                    // If there's a staged delete pending, commit it first (synchronously)
+                                    if (!staged_deletes.empty()) {
+                                        for (const auto& sd : staged_deletes) {
+                                            DeleteRecursive(server_buf, share_buf, sd.temp, username_buf, password_buf);
+                                        }
+                                        staged_deletes.clear();
+                                    }
+
+                                    // Stage the directory delete via rename
+                                    time_t t = time(NULL);
+                                    std::string name_only = pending_delete_remote;
+                                    size_t pos = name_only.find_last_of('/');
+                                    if (pos != std::string::npos) name_only = name_only.substr(pos + 1);
+                                    while (!name_only.empty() && name_only[0] == '.') name_only.erase(0, 1);
+                                    const std::string del_prefix = "deleted_";
+                                    while (name_only.rfind(del_prefix, 0) == 0) {
+                                        size_t after = del_prefix.size();
+                                        size_t next_us = name_only.find('_', after);
+                                        if (next_us == std::string::npos) break;
+                                        name_only.erase(0, next_us + 1);
+                                        while (!name_only.empty() && name_only[0] == '.') name_only.erase(0, 1);
+                                    }
+                                    char tmpname[512];
+                                    snprintf(tmpname, sizeof(tmpname), ".deleted_%ld_%s", (long)t, name_only.c_str());
+                                    std::string temp_remote = std::string(".") + std::string(tmpname);
+
+                                    printf("STAGE RECURSIVE DELETE: rename '%s' -> '%s'\n", pending_delete_remote.c_str(), temp_remote.c_str());
+                                    bool moved = MoveRemote(server_buf, share_buf, pending_delete_remote, temp_remote, username_buf, password_buf);
+                                    if (moved) {
+                                        // commit any previously staged deletes in background
+                                        if (!staged_deletes.empty()) {
+                                            std::lock_guard<std::mutex> lk(delete_mutex);
+                                            for (const auto& sd : staged_deletes) delete_tasks.push_back({ sd.temp, sd.is_dir });
+                                            delete_cv.notify_one();
+                                            staged_deletes.clear();
+                                        }
+                                        staged_deletes.push_back({ pending_delete_remote, temp_remote, true });
+                                        file_list = ListSMBFiles(server_buf, share_buf, current_path, username_buf, password_buf);
+                                    }
+                                    else {
+                                        printf("STAGE RECURSIVE DELETE FAILED for '%s'\n", pending_delete_remote.c_str());
+                                    }
+                                }
+
+                                pending_delete_remote.clear();
+                                ImGui::CloseCurrentPopup();
+                            }
+                            ImGui::SameLine();
+                            if (ImGui::Button("Cancel", ImVec2(120, 0)))
+                            {
+                                pending_delete_remote.clear();
+                                ImGui::CloseCurrentPopup();
+                            }
+                            ImGui::EndPopup();
+                        }
+
+                        ImGui::Columns(1);
+                        ImGui::EndChild();
                     }
                 }
 
-                // Active uploads
-                if (!upload_status_map.empty()) {
-                    ImGui::Separator();
-                    ImGui::Text("Active uploads:");
-                    std::lock_guard<std::mutex> lk(upload_mutex);
-                    for (auto &p : upload_status_map) {
-                        auto &st = p.second;
-                        float frac = 0.0f;
-                        if (st.total > 0) frac = (float)st.transferred / (float)st.total;
-                        ImGui::Text("%s", st.local.c_str());
-                        ImGui::ProgressBar(frac, ImVec2(-1, 0));
-                        if (st.done) ImGui::Text(st.success ? "Done" : "Failed");
-                    }
-                }
+                ImGui::Render();
+                glClearColor(0.45f, 0.55f, 0.60f, 1.00f);
+                glClear(GL_COLOR_BUFFER_BIT);
+                ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+                glfwSwapBuffers(window);
             }
 
-            if (!file_list.empty())
-            {
-                ImGui::BeginChild("FileList", ImVec2(0, 200), true);
-                // two columns: name and actions
-                ImGui::Columns(2, "files_cols", false);
-                ImGui::SetColumnWidth(1, 120);
-                for (size_t idx = 0; idx < file_list.size(); ++idx)
-                {
-                    const auto &file = file_list[idx];
-                    std::string label = (file.is_dir ? "[DIR] " : "[FILE] ") + file.name;
+            // Signal workers to stop and join threads cleanly
+            workers_stop = true;
+            upload_cv.notify_all();
+            delete_cv.notify_all();
+            if (upload_worker_thread.joinable()) upload_worker_thread.join();
+            if (delete_worker_thread.joinable()) delete_worker_thread.join();
 
-                    ImGui::PushID((int)idx);
-                    // name column: selectable
-                    if (ImGui::Selectable(label.c_str(), false, 0, ImVec2(0, 0)))
-                    {
-                        if (!file.is_dir)
-                        {
-                            std::string full_remote = std::string(current_path);
-                            if (strlen(current_path) > 0 && current_path[0])
-                                full_remote += "/";
-                            full_remote += file.name;
-                            DownloadFile(server_buf, share_buf, full_remote,
-                                         file.name.c_str(), username_buf, password_buf);
-                        }
-                        else
-                        {
-                            std::string new_path = std::string(current_path);
-                            if (strlen(current_path) > 0 && current_path[0])
-                                new_path += "/";
-                            new_path += file.name;
-                            strncpy(current_path, new_path.c_str(), sizeof(current_path) - 1);
-                            file_list = ListSMBFiles(server_buf, share_buf, current_path,
-                            username_buf, password_buf);
-                        }
-                    }
-                    ImGui::NextColumn();
-
-                    // actions column: delete button
-                    char delbtn[64];
-                    sprintf(delbtn, "Delete##%zu", idx);
-                    if (ImGui::SmallButton(delbtn))
-                    {
-                        std::string full_remote = std::string(current_path);
-                        if (strlen(current_path) > 0 && current_path[0])
-                            full_remote += "/";
-                        full_remote += file.name;
-
-                        // For both files and directories show confirmation popup
-                        pending_delete_remote = full_remote;
-                        pending_delete_is_dir = file.is_dir;
-                        pending_delete_open_popup = true;
-                    }
-                    else {
-                        // no-op
-                    }
-                    
-                    // (end SmallButton handling)
-                    ImGui::PopID();
-                    ImGui::NextColumn();
-                }
-
-                if (pending_delete_open_popup) {
-                    ImGui::OpenPopup("Confirm Delete");
-                    pending_delete_open_popup = false;
-                }
-                if (ImGui::BeginPopupModal("Confirm Delete", NULL, ImGuiWindowFlags_AlwaysAutoResize))
-                {
-                    ImGui::Text("Delete directory '%s' and ALL its contents?", pending_delete_remote.c_str());
-                    ImGui::Separator();
-                    if (ImGui::Button("OK", ImVec2(120, 0)))
-                    {
-                        // If there are staged deletes already, commit them first for file-delete path
-                        if (!pending_delete_is_dir) {
-                            if (!staged_deletes.empty()) {
-                                std::lock_guard<std::mutex> lk(delete_mutex);
-                                for (const auto &sd : staged_deletes) delete_tasks.push_back({sd.temp, sd.is_dir});
-                                delete_cv.notify_one();
-                                staged_deletes.clear();
-                            }
-
-                            // Stage single file delete via rename
-                            time_t t = time(NULL);
-                            // extract base name
-                            std::string name_only = pending_delete_remote;
-                            size_t pos = name_only.find_last_of('/');
-                            if (pos != std::string::npos) name_only = name_only.substr(pos + 1);
-                            // sanitize
-                            while (!name_only.empty() && name_only[0] == '.') name_only.erase(0, 1);
-                            const std::string del_prefix = "deleted_";
-                            while (name_only.rfind(del_prefix, 0) == 0) {
-                                size_t after = del_prefix.size();
-                                size_t next_us = name_only.find('_', after);
-                                if (next_us == std::string::npos) break;
-                                name_only.erase(0, next_us + 1);
-                                while (!name_only.empty() && name_only[0] == '.') name_only.erase(0, 1);
-                            }
-                            char tmpname[512];
-                            snprintf(tmpname, sizeof(tmpname), ".deleted_%ld_%s", (long)t, name_only.c_str());
-                            std::string temp_remote = std::string(".") + std::string(tmpname);
-
-                            printf("STAGE DELETE: rename '%s' -> '%s'\n", pending_delete_remote.c_str(), temp_remote.c_str());
-                            bool moved = MoveRemote(server_buf, share_buf, pending_delete_remote, temp_remote, username_buf, password_buf);
-                            if (moved) {
-                                staged_deletes.push_back({pending_delete_remote, temp_remote, false});
-                                file_list = ListSMBFiles(server_buf, share_buf, current_path, username_buf, password_buf);
-                            } else {
-                                printf("STAGE DELETE FAILED for '%s'\n", pending_delete_remote.c_str());
-                            }
-                        } else {
-                            // Directory delete path (existing behavior)
-                            // If there's a staged delete pending, commit it first (synchronously)
-                            if (!staged_deletes.empty()) {
-                                for (const auto &sd : staged_deletes) {
-                                    DeleteRecursive(server_buf, share_buf, sd.temp, username_buf, password_buf);
-                                }
-                                staged_deletes.clear();
-                            }
-
-                            // Stage the directory delete via rename
-                            time_t t = time(NULL);
-                            std::string name_only = pending_delete_remote;
-                            size_t pos = name_only.find_last_of('/');
-                            if (pos != std::string::npos) name_only = name_only.substr(pos + 1);
-                            while (!name_only.empty() && name_only[0] == '.') name_only.erase(0, 1);
-                            const std::string del_prefix = "deleted_";
-                            while (name_only.rfind(del_prefix, 0) == 0) {
-                                size_t after = del_prefix.size();
-                                size_t next_us = name_only.find('_', after);
-                                if (next_us == std::string::npos) break;
-                                name_only.erase(0, next_us + 1);
-                                while (!name_only.empty() && name_only[0] == '.') name_only.erase(0, 1);
-                            }
-                            char tmpname[512];
-                            snprintf(tmpname, sizeof(tmpname), ".deleted_%ld_%s", (long)t, name_only.c_str());
-                            std::string temp_remote = std::string(".") + std::string(tmpname);
-
-                            printf("STAGE RECURSIVE DELETE: rename '%s' -> '%s'\n", pending_delete_remote.c_str(), temp_remote.c_str());
-                            bool moved = MoveRemote(server_buf, share_buf, pending_delete_remote, temp_remote, username_buf, password_buf);
-                            if (moved) {
-                                // commit any previously staged deletes in background
-                                if (!staged_deletes.empty()) {
-                                    std::lock_guard<std::mutex> lk(delete_mutex);
-                                    for (const auto &sd : staged_deletes) delete_tasks.push_back({sd.temp, sd.is_dir});
-                                    delete_cv.notify_one();
-                                    staged_deletes.clear();
-                                }
-                                staged_deletes.push_back({pending_delete_remote, temp_remote, true});
-                                file_list = ListSMBFiles(server_buf, share_buf, current_path, username_buf, password_buf);
-                            } else {
-                                printf("STAGE RECURSIVE DELETE FAILED for '%s'\n", pending_delete_remote.c_str());
-                            }
-                        }
-
-                        pending_delete_remote.clear();
-                        ImGui::CloseCurrentPopup();
-                    }
-                    ImGui::SameLine();
-                    if (ImGui::Button("Cancel", ImVec2(120, 0)))
-                    {
-                        pending_delete_remote.clear();
-                        ImGui::CloseCurrentPopup();
-                    }
-                    ImGui::EndPopup();
-                }
-
-                ImGui::Columns(1);
-                ImGui::EndChild();
-            }
-        }
-
-        ImGui::Render();
-        glClearColor(0.45f, 0.55f, 0.60f, 1.00f);
-        glClear(GL_COLOR_BUFFER_BIT);
-        ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
-        glfwSwapBuffers(window);
-    }
-
-    // Signal workers to stop and join threads cleanly
-    workers_stop = true;
-    upload_cv.notify_all();
-    delete_cv.notify_all();
-    if (upload_worker_thread.joinable()) upload_worker_thread.join();
-    if (delete_worker_thread.joinable()) delete_worker_thread.join();
-
-    ImGui_ImplOpenGL3_Shutdown();
-    ImGui_ImplGlfw_Shutdown();
-    ImGui::DestroyContext();
-    glfwDestroyWindow(window);
-    glfwTerminate();
-    return 0;
+            ImGui_ImplOpenGL3_Shutdown();
+            ImGui_ImplGlfw_Shutdown();
+            ImGui::DestroyContext();
+            glfwDestroyWindow(window);
+            glfwTerminate();
+            return 0;
 }
