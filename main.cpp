@@ -441,14 +441,19 @@ int main()
                             ImGui::Separator();
                             ImGui::Text("Active uploads:");
                             std::lock_guard<std::mutex> lk(upload_mutex);
-                            for (auto& p : upload_status_map) {
-                                auto& st = p.second;
-                                float frac = 0.0f;
-                                if (st.total > 0) frac = (float)st.transferred / (float)st.total;
-                                ImGui::Text("%s", st.local.c_str());
-                                ImGui::ProgressBar(frac, ImVec2(-1, 0));
-                                if (st.done) ImGui::Text(st.success ? "Done" : "Failed");
-                            }
+                                for (auto& p : upload_status_map) {
+                                    auto& st = p.second;
+                                    float frac = 0.0f;
+                                    if (st.total > 0) frac = (float)st.transferred / (float)st.total;
+                                    // show filename and numeric progress for debugging
+                                    if (st.total > 0) {
+                                        ImGui::Text("%s (%zu / %zu bytes)", st.local.c_str(), st.transferred, st.total);
+                                    } else {
+                                        ImGui::Text("%s (%zu bytes)", st.local.c_str(), st.transferred);
+                                    }
+                                    ImGui::ProgressBar(frac, ImVec2(-1, 0));
+                                    if (st.done) ImGui::Text(st.success ? "Done" : "Failed");
+                                }
                         }
 
                         // Active downloads
@@ -541,7 +546,10 @@ int main()
                         }
                         if (ImGui::BeginPopupModal("Confirm Delete", NULL, ImGuiWindowFlags_AlwaysAutoResize))
                         {
-                            ImGui::Text("Delete directory '%s' and ALL its contents?", pending_delete_remote.c_str());
+                            if(!pending_delete_is_dir)
+                                ImGui::Text("Delete file '%s'?", pending_delete_remote.c_str());
+                            else
+                                ImGui::Text("Delete directory '%s' and ALL its contents?", pending_delete_remote.c_str());
                             ImGui::Separator();
                             if (ImGui::Button("OK", ImVec2(120, 0)))
                             {
