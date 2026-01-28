@@ -79,12 +79,18 @@ void showSettingsTab(){
             ImVec4& collapseHead = style.Colors[ImGuiCol_TitleBg];
             ImVec4& collapseHeadActive = style.Colors[ImGuiCol_TitleBgActive];
             ImVec4& ProgressBar = style.Colors[ImGuiCol_PlotHistogram];
+            ImVec4& titlebgActive = style.Colors[ImGuiCol_TitleBgActive];
+            ImVec4& titlebg = style.Colors[ImGuiCol_TitleBg];
             if(ImGui::CollapsingHeader("Rounding")){
                 ImGui::SliderFloat("Frame Rounding", &style.FrameRounding, 0.0f, 10.0f);
                 ImGui::SliderFloat("Scrollbar Rounding", &style.ScrollbarRounding, 0.0f, 10.0f);
             }
             if(ImGui::CollapsingHeader("Colors")){
                 ImGui::Text("Modify Colors:");
+                if(ImGui::ColorEdit4("Title Background Color", (float*)&titlebg.x, ImGuiColorEditFlags_AlphaBar)) {
+                }
+                if(ImGui::ColorEdit4("Title Background Active Color", (float*)&titlebgActive.x, ImGuiColorEditFlags_AlphaBar)) {
+                }
                 if (ImGui::ColorEdit4("Button Color", (float*)&buttonCol.x, ImGuiColorEditFlags_AlphaBar)) {
                 }
                 if(ImGui::ColorEdit4("Button Hovered Color", (float*)&buttonHov.x, ImGuiColorEditFlags_AlphaBar)) {
