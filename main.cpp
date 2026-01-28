@@ -52,6 +52,8 @@ static std::atomic<int> next_upload_id{ 1 };
 static std::thread upload_worker_thread;
 static std::atomic<bool> workers_stop{ false };
 static bool upload_show_active = false; // keep upload UI visible until next upload attempt
+static std::atomic<int> uploads_in_progress{0};
+static std::atomic<bool> refresh_listing_after_upload{false};
 
 // Download worker structures
 struct DownloadTask { int id; std::string remote; std::string local; size_t total_bytes; };
@@ -78,8 +80,6 @@ static bool pending_delete_open_popup = false;
 
 int main()
 {
-    printf("SMB BROWSER STARTING\n");
-
     glfwInit();
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
@@ -140,7 +140,17 @@ int main()
                         [&](ssize_t written) {
                             std::lock_guard<std::mutex> lk(upload_mutex);
                             auto it = upload_status_map.find(task.id);
-                            if (it != upload_status_map.end()) it->second.transferred += (size_t)written;
+                            if (it != upload_status_map.end()) {
+                                // if total unknown, try to determine it from the local file
+                                if (it->second.total == 0) {
+                                    try {
+                                        it->second.total = (size_t)std::filesystem::file_size(task.local);
+                                    } catch (...) {
+                                        // leave total as 0 if we can't determine it
+                                    }
+                                }
+                                it->second.transferred += (size_t)written;
+                            }
                         });
 
                     {
@@ -148,6 +158,8 @@ int main()
                         auto it = upload_status_map.find(task.id);
                         if (it != upload_status_map.end()) { it->second.done = true; it->second.success = ok; }
                     }
+                    // track active uploads
+                    uploads_in_progress.fetch_sub(1);
                 }
                 });
 
@@ -382,19 +394,13 @@ int main()
                                     if (strlen(current_path) > 0 && current_path[0])
                                         full_remote += "/";
 
-                                    // include the immediate parent directory of the local file in the remote path
+                                    // Use only the local filename when uploading (don't create local parent dirs remotely)
                                     try {
                                         std::filesystem::path p(localPath);
                                         std::string filename = p.filename().string();
-                                        std::string parent_dir = p.parent_path().filename().string();
-                                        if (!parent_dir.empty() && parent_dir != ".") {
-                                            if (!full_remote.empty() && full_remote.back() != '/') full_remote += "/";
-                                            full_remote += parent_dir;
-                                            full_remote += "/";
-                                        }
+                                        if (!full_remote.empty() && full_remote.back() != '/') full_remote += "/";
                                         full_remote += filename;
                                     } catch (...) {
-    
                                         const char* lp = localPath.c_str();
                                         const char* filename_slash = strrchr(lp, '/');
                                         const char* filename_back = strrchr(lp, '\\');
@@ -405,6 +411,7 @@ int main()
                                             filename = lp;
                                         else
                                             filename++;
+                                        if (!full_remote.empty() && full_remote.back() != '/') full_remote += "/";
                                         full_remote += filename;
                                     }
 
@@ -419,10 +426,11 @@ int main()
                                         upload_tasks.push_back(UploadTask{ id, localPath, full_remote, fsize });
                                         upload_status_map[id] = UploadStatus{ id, localPath, full_remote, 0, fsize, false, false };
                                     }
+                                    uploads_in_progress.fetch_add(1);
                                     upload_cv.notify_one();
                                 }
-                                // refresh listing after all attempts
-                                file_list = ListSMBFiles(server_buf, share_buf, current_path, username_buf, password_buf);
+                                // request a refresh after uploads complete (avoid doing SMB calls here)
+                                refresh_listing_after_upload.store(true);
                                 upload_queue.clear();
                                 upload_ready = false;
                             }

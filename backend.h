@@ -13,6 +13,7 @@
 #include <fcntl.h>
 #include <filesystem>
 #include <sstream>
+#include <mutex>
 
 int file_exists_fopen(const char *filename) {
     FILE *file;
@@ -81,11 +82,16 @@ void auth_fn(const char *server, const char *share,
     workgroup[0] = 0;
 }
 
+// global mutex to serialize libsmbclient operations (some backends/protocols
+// are not safe for concurrent smbc calls from multiple threads)
+static std::mutex g_smb_mutex;
+
 // Ensure remote directory exists by creating any missing path components.
 // Returns true if the directory exists or was created successfully.
 static bool EnsureRemoteDirExists(const std::string& server, const std::string& share,
                                   const std::string& remoteDir,
                                   const std::string& username, const std::string& password) {
+    std::lock_guard<std::mutex> smb_lock(g_smb_mutex);
     if (remoteDir.empty()) return true;
     g_smb_username = username;
     g_smb_password = password;
@@ -102,21 +108,38 @@ static bool EnsureRemoteDirExists(const std::string& server, const std::string& 
         accum += token;
         std::string cur = base + "/" + UrlEncode(accum);
         int dh = smbc_opendir(cur.c_str());
-        if (dh == -1) {
-            // try to create
-            if (smbc_mkdir(cur.c_str(), 0777) == -1) {
-                if (errno == EEXIST) {
-                    // weird, keep going
+            if (dh == -1) {
+                // Try a raw (non-URL-encoded) path as some servers dislike percent-encoding
+                std::string cur_raw = base + "/" + accum;
+                int pdh_raw = smbc_opendir(cur_raw.c_str());
+                if (pdh_raw != -1) {
+                    smbc_closedir(pdh_raw);
+                    continue;
+                }
+
+                // try to create (first encoded, then raw)
+                if (smbc_mkdir(cur.c_str(), 0777) == -1) {
+                    if (errno == EEXIST) {
+                        // exists, continue
+                    } else {
+                        // try raw mkdir
+                        if (smbc_mkdir(cur_raw.c_str(), 0777) == -1) {
+                            if (errno == EEXIST) {
+                                // exists
+                            } else {
+                                printf("EnsureRemoteDirExists: mkdir failed for '%s' and '%s' (errno=%d: %s)\n", cur.c_str(), cur_raw.c_str(), errno, strerror(errno));
+                                return false;
+                            }
+                        } else {
+                            printf("EnsureRemoteDirExists: created (raw) '%s'\n", cur_raw.c_str());
+                        }
+                    }
                 } else {
-                    printf("EnsureRemoteDirExists: mkdir failed '%s' (errno=%d: %s)\n", cur.c_str(), errno, strerror(errno));
-                    return false;
+                    printf("EnsureRemoteDirExists: created '%s'\n", cur.c_str());
                 }
             } else {
-                printf("EnsureRemoteDirExists: created '%s'\n", cur.c_str());
+                smbc_closedir(dh);
             }
-        } else {
-            smbc_closedir(dh);
-        }
     }
     return true;
 }
@@ -125,7 +148,7 @@ std::vector<SMBFileInfo> ListSMBFiles(const std::string& server, const std::stri
                                     const std::string& path, const std::string& username, 
                                     const std::string& password) {
     std::vector<SMBFileInfo> files;
-    
+    std::lock_guard<std::mutex> smb_lock(g_smb_mutex);
     // Set credentials for auth callback and initialize
     g_smb_username = username;
     g_smb_password = password;
@@ -160,6 +183,7 @@ std::vector<SMBFileInfo> ListSMBFiles(const std::string& server, const std::stri
 bool DownloadFile(const std::string& server, const std::string& share, 
                   const std::string& path, const std::string& localFile,
                   const std::string& username, const std::string& password) {
+    std::lock_guard<std::mutex> smb_lock(g_smb_mutex);
     g_smb_username = username;
     g_smb_password = password;
     smbc_init(auth_fn, 1);
@@ -193,6 +217,7 @@ bool DownloadFileWithProgress(const std::string& server, const std::string& shar
                               const std::string& path, const std::string& localFile,
                               const std::string& username, const std::string& password,
                               const std::function<void(ssize_t)>& progress_cb) {
+    std::lock_guard<std::mutex> smb_lock(g_smb_mutex);
     g_smb_username = username;
     g_smb_password = password;
     smbc_init(auth_fn, 1);
@@ -228,6 +253,7 @@ bool DownloadFileWithProgress(const std::string& server, const std::string& shar
 bool UploadFile(const std::string& server, const std::string& share, 
                 const std::string& remotePath, const std::string& localFile,
                 const std::string& username, const std::string& password) {
+    std::lock_guard<std::mutex> smb_lock(g_smb_mutex);
     g_smb_username = username;
     g_smb_password = password;
     smbc_init(auth_fn, 1);
@@ -303,6 +329,7 @@ bool UploadFileWithProgress(const std::string& server, const std::string& share,
                             const std::string& remotePath, const std::string& localFile,
                             const std::string& username, const std::string& password,
                             const std::function<void(ssize_t)>& progress_cb) {
+    std::lock_guard<std::mutex> smb_lock(g_smb_mutex);
     g_smb_username = username;
     g_smb_password = password;
     smbc_init(auth_fn, 1);
@@ -341,6 +368,18 @@ bool UploadFileWithProgress(const std::string& server, const std::string& share,
         smbc_closedir(pdh2);
     }
     int fd = smbc_open(smb_url.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0666);
+    if (fd == -1) {
+        // try raw (non-URL-encoded) path as a fallback
+        std::string smb_url_raw = std::string("smb://") + server + "/" + share;
+        if (!remotePath.empty()) smb_url_raw += "/" + remotePath;
+        printf("UploadFileWithProgress: initial open failed for '%s' (errno=%d: %s), trying raw '%s'\n", smb_url.c_str(), errno, strerror(errno), smb_url_raw.c_str());
+        fd = smbc_open(smb_url_raw.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0666);
+        if (fd == -1) {
+            printf("UploadFileWithProgress: raw open also failed for '%s' (errno=%d: %s)\n", smb_url_raw.c_str(), errno, strerror(errno));
+            in.close();
+            return false;
+        }
+    }
 
     char buffer[8192];
     while (true) {
@@ -369,6 +408,7 @@ bool UploadFileWithProgress(const std::string& server, const std::string& share,
 bool DeleteFile(const std::string& server, const std::string& share,
                 const std::string& remotePath, bool is_dir,
                 const std::string& username, const std::string& password) {
+    std::lock_guard<std::mutex> smb_lock(g_smb_mutex);
     g_smb_username = username;
     g_smb_password = password;
     smbc_init(auth_fn, 1);
@@ -394,6 +434,7 @@ bool DeleteFile(const std::string& server, const std::string& share,
 bool DeleteRecursive(const std::string& server, const std::string& share,
                      const std::string& remotePath,
                      const std::string& username, const std::string& password) {
+    std::lock_guard<std::mutex> smb_lock(g_smb_mutex);
     g_smb_username = username;
     g_smb_password = password;
     smbc_init(auth_fn, 1);
@@ -454,6 +495,7 @@ bool DeleteRecursive(const std::string& server, const std::string& share,
 bool MoveRemote(const std::string& server, const std::string& share,
                 const std::string& oldRemotePath, const std::string& newRemotePath,
                 const std::string& username, const std::string& password) {
+    std::lock_guard<std::mutex> smb_lock(g_smb_mutex);
     g_smb_username = username;
     g_smb_password = password;
     smbc_init(auth_fn, 1);

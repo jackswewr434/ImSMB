@@ -77,6 +77,8 @@ void showSettingsTab(){
             ImVec4& buttonHov = style.Colors[ImGuiCol_ButtonHovered];
             ImVec4& buttonAct = style.Colors[ImGuiCol_ButtonActive];
             ImVec4& collapseHead = style.Colors[ImGuiCol_TitleBg];
+            ImVec4& collapseHeadActive = style.Colors[ImGuiCol_TitleBgActive];
+            ImVec4& ProgressBar = style.Colors[ImGuiCol_PlotHistogram];
             if(ImGui::CollapsingHeader("Rounding")){
                 ImGui::SliderFloat("Frame Rounding", &style.FrameRounding, 0.0f, 10.0f);
                 ImGui::SliderFloat("Scrollbar Rounding", &style.ScrollbarRounding, 0.0f, 10.0f);
@@ -102,6 +104,10 @@ void showSettingsTab(){
                 if(ImGui::ColorEdit4("Scrollbar Grab Active Color", (float*)&scrollGrabActCol.x, ImGuiColorEditFlags_AlphaBar)) {
                 }
                 if(ImGui::ColorEdit4("Collapsing Header Color", (float*)&collapseHead.x, ImGuiColorEditFlags_AlphaBar)) {
+                }
+                if(ImGui::ColorEdit4("Collapsing Header Active Color", (float*)&collapseHeadActive.x, ImGuiColorEditFlags_AlphaBar)) {
+                }
+                if(ImGui::ColorEdit4("Progress Bar Color", (float*)&ProgressBar.x, ImGuiColorEditFlags_AlphaBar)) {
                 }
                 
             }
