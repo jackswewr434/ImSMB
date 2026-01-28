@@ -1,6 +1,6 @@
 /*
     IMPORTANT!!! TODO:
-        Fix deletion. idk wtf went wrong [ ]
+        Fix upload. idk wtf went wrong [ ]
         DONT DELETE THIS DIRECTORY [ ]
 
         implement github release checking [ ]
