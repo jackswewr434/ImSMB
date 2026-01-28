@@ -1,3 +1,12 @@
+/*
+    IMPORTANT!!! TODO:
+        Fix deletion. idk wtf went wrong [ ]
+        DONT DELETE THIS DIRECTORY [ ]
+
+        implement github release checking [ ]
+
+        Made by Jackson Andrawis (jacksonandrawis@gmail.com) 2026
+*/
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
 #define GLFW_EXPOSE_NATIVE_X11
@@ -18,14 +27,17 @@
 #include <map>
 #include <chrono>
 #include <filesystem>
-
+#include "styles.h"
+#include "settings.h"
 char server_buf[64] = "192.168.8.93";
 char share_buf[64] = "tmp";
 char username_buf[64] = "jandrawis";
 char password_buf[64] = "1997";
 static std::vector<SMBFileInfo> file_list;
 static char current_path[512] = "";
-
+//bool tabs
+bool smbBrowsing = true;
+bool settingsTab = false;
 static std::vector<std::string> upload_queue;
 static char local_file_buf[512] = "";
 static bool upload_ready = false;
@@ -39,6 +51,17 @@ static std::condition_variable upload_cv;
 static std::atomic<int> next_upload_id{ 1 };
 static std::thread upload_worker_thread;
 static std::atomic<bool> workers_stop{ false };
+static bool upload_show_active = false; // keep upload UI visible until next upload attempt
+
+// Download worker structures
+struct DownloadTask { int id; std::string remote; std::string local; size_t total_bytes; };
+struct DownloadStatus { int id; std::string remote; std::string local; size_t transferred = 0; size_t total; bool done; bool success; };
+static std::deque<DownloadTask> download_tasks;
+static std::map<int, DownloadStatus> download_status_map;
+static std::mutex download_mutex;
+static std::condition_variable download_cv;
+static std::atomic<int> next_download_id{ 1 };
+static std::thread download_worker_thread;
 
 // Delete worker structures
 struct DeleteTask { std::string remote; bool is_dir; };
@@ -62,10 +85,10 @@ int main()
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 
-    GLFWwindow* window = glfwCreateWindow(1280, 800, "SMB Browser Linux", NULL, NULL);
+    GLFWwindow* window = glfwCreateWindow(1280, 800, "SMB Browser by Jackson Andrawis", NULL, NULL);
     glfwMakeContextCurrent(window);
     glfwSwapInterval(1);
-    glewInit(); // NO CHECK - just call it like before
+    glewInit(); 
 
     printf("All inits done\n");
 
@@ -73,7 +96,12 @@ int main()
     ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO();
     (void)io;
+    if(file_exists_fopen("theme.cfg")){
+        LoadStyle("theme.cfg");
+    }
+    else{
     ImGui::StyleColorsDark();
+    }
     ImGui_ImplGlfw_InitForOpenGL(window, true);
     // Receive OS file drops (first path) and mark upload ready
     glfwSetDropCallback(window, [](GLFWwindow* /*w*/, int count, const char** paths)
@@ -138,17 +166,84 @@ int main()
                 }
                 });
 
+                // Start download worker
+                download_worker_thread = std::thread([]() {
+                    while (!workers_stop) {
+                        DownloadTask task;
+                        {
+                            std::unique_lock<std::mutex> lk(download_mutex);
+                            download_cv.wait(lk, [] {return workers_stop || !download_tasks.empty(); });
+                            if (workers_stop) break;
+                            task = download_tasks.front(); download_tasks.pop_front();
+                        }
+
+                        {
+                            std::lock_guard<std::mutex> lk(download_mutex);
+                            auto& st = download_status_map[task.id];
+                            st.id = task.id; st.local = task.local; st.remote = task.remote; st.transferred = 0; st.total = task.total_bytes; st.done = false; st.success = false;
+                        }
+
+                        bool ok = DownloadFileWithProgress(server_buf, share_buf, task.remote, task.local, username_buf, password_buf,
+                            [&](ssize_t read) {
+                                std::lock_guard<std::mutex> lk(download_mutex);
+                                auto it = download_status_map.find(task.id);
+                                if (it != download_status_map.end()) it->second.transferred += (size_t)read;
+                            });
+
+                        {
+                            std::lock_guard<std::mutex> lk(download_mutex);
+                            auto it = download_status_map.find(task.id);
+                            if (it != download_status_map.end()) { it->second.done = true; it->second.success = ok; }
+                        }
+                    }
+                });
+
             while (!glfwWindowShouldClose(window))
             {
                 glfwPollEvents();
                 ImGui_ImplOpenGL3_NewFrame();
                 ImGui_ImplGlfw_NewFrame();
                 ImGui::NewFrame();
-
-                if (ImGui::CollapsingHeader("SMB Browser"))
+                // Host window that fills the entire GLFW client area and is not movable.
+                ImGuiViewport* vp = ImGui::GetMainViewport();
+                ImGui::SetNextWindowPos(vp->Pos);
+                ImGui::SetNextWindowSize(vp->Size);
+                ImGuiWindowFlags host_flags = ImGuiWindowFlags_NoDecoration
+                                             | ImGuiWindowFlags_NoMove
+                                             | ImGuiWindowFlags_NoResize
+                                             | ImGuiWindowFlags_NoBringToFrontOnFocus;
+                ImGui::Begin("SMB Browser", NULL, host_flags);
+                if (ImGui::Button("SMB Browser")){
+                    if(settingsTab){
+                        settingsTab = false;
+                    }
+                    if(!smbBrowsing){
+                        smbBrowsing = true;
+                    }
+                    else{
+                        smbBrowsing = false;
+                    }
+                }
+                ImGui::SameLine();
+                if(ImGui::Button("Settings")){
+                    if(smbBrowsing){
+                        smbBrowsing = false;
+                    }
+                    if(!settingsTab){
+                        settingsTab = true;
+                    }
+                    else{
+                        settingsTab = false;
+                    }
+                }
+                if(settingsTab){
+                    smbBrowsing = false;
+                    showSettingsTab();
+                }
+                if(smbBrowsing)
                 {
                     ImGui::InputText("Server", server_buf, 64);
-                    ImGui::InputText("Share", share_buf, 64);
+                    ImGui::InputText("Folder/Share", share_buf, 64);
                     ImGui::InputText("Username", username_buf, 64);
                     ImGui::InputText("Password", password_buf, 64, ImGuiInputTextFlags_Password);
 
@@ -161,9 +256,14 @@ int main()
 
                     if (ImGui::Button("Back") && strlen(current_path) > 0)
                     {
+                        //todo fix
                         char* last_slash = strrchr(current_path, '/');
-                        if (last_slash && last_slash > current_path)
+                        if (last_slash && last_slash > current_path){
                             *last_slash = 0;
+                        }
+                        else{
+                            current_path[0] = '\0';
+                        }
                         file_list = ListSMBFiles(server_buf, share_buf, current_path, username_buf, password_buf);
                     }
 
@@ -175,7 +275,7 @@ int main()
 
                     if (ImGui::BeginChild("DropZone", ImVec2(0, 80), true))
                     {
-                        ImGui::Text("DRAG FILES HERE");
+                        ImGui::Text("drag files for upload here!");
 
                         if (ImGui::BeginDragDropTarget())
                         {
@@ -226,7 +326,7 @@ int main()
                         }
                     }
 
-                    if (upload_ready && (!upload_queue.empty() || strlen(local_file_buf) > 0))
+                    if ((upload_ready && (!upload_queue.empty() || strlen(local_file_buf) > 0)) || upload_show_active)
                     {
                         ImGui::Separator();
 
@@ -270,24 +370,43 @@ int main()
                             if (ImGui::Button("Upload All"))
                             {
                                 printf("UPLOAD ALL CLICKED (%zu files)\n", upload_queue.size());
+                                // Starting a new upload run: clear any previous status and show upload UI
+                                {
+                                    std::lock_guard<std::mutex> lk(upload_mutex);
+                                    upload_status_map.clear();
+                                }
+                                upload_show_active = true;
                                 for (const auto& localPath : upload_queue)
                                 {
-                                    // build remote path
                                     std::string full_remote = std::string(current_path);
                                     if (strlen(current_path) > 0 && current_path[0])
                                         full_remote += "/";
 
-                                    const char* lp = localPath.c_str();
-                                    const char* filename_slash = strrchr(lp, '/');
-                                    const char* filename_back = strrchr(lp, '\\');
-                                    const char* filename = filename_slash;
-                                    if (!filename || (filename_back && filename_back > filename))
-                                        filename = filename_back;
-                                    if (!filename)
-                                        filename = lp;
-                                    else
-                                        filename++;
-                                    full_remote += filename;
+                                    // include the immediate parent directory of the local file in the remote path
+                                    try {
+                                        std::filesystem::path p(localPath);
+                                        std::string filename = p.filename().string();
+                                        std::string parent_dir = p.parent_path().filename().string();
+                                        if (!parent_dir.empty() && parent_dir != ".") {
+                                            if (!full_remote.empty() && full_remote.back() != '/') full_remote += "/";
+                                            full_remote += parent_dir;
+                                            full_remote += "/";
+                                        }
+                                        full_remote += filename;
+                                    } catch (...) {
+    
+                                        const char* lp = localPath.c_str();
+                                        const char* filename_slash = strrchr(lp, '/');
+                                        const char* filename_back = strrchr(lp, '\\');
+                                        const char* filename = filename_slash;
+                                        if (!filename || (filename_back && filename_back > filename))
+                                            filename = filename_back;
+                                        if (!filename)
+                                            filename = lp;
+                                        else
+                                            filename++;
+                                        full_remote += filename;
+                                    }
 
                                     printf("ENQUEUE UPLOAD -> smb://%s/%s/%s\n", server_buf, share_buf, full_remote.c_str());
                                     // compute file size
@@ -297,8 +416,8 @@ int main()
                                     int id = next_upload_id.fetch_add(1);
                                     {
                                         std::lock_guard<std::mutex> lk(upload_mutex);
-                                        upload_tasks.push_back({ id, localPath, full_remote, fsize });
-                                        upload_status_map[id] = { id, localPath, full_remote, 0, fsize, false, false };
+                                        upload_tasks.push_back(UploadTask{ id, localPath, full_remote, fsize });
+                                        upload_status_map[id] = UploadStatus{ id, localPath, full_remote, 0, fsize, false, false };
                                     }
                                     upload_cv.notify_one();
                                 }
@@ -315,6 +434,21 @@ int main()
                             ImGui::Text("Active uploads:");
                             std::lock_guard<std::mutex> lk(upload_mutex);
                             for (auto& p : upload_status_map) {
+                                auto& st = p.second;
+                                float frac = 0.0f;
+                                if (st.total > 0) frac = (float)st.transferred / (float)st.total;
+                                ImGui::Text("%s", st.local.c_str());
+                                ImGui::ProgressBar(frac, ImVec2(-1, 0));
+                                if (st.done) ImGui::Text(st.success ? "Done" : "Failed");
+                            }
+                        }
+
+                        // Active downloads
+                        if (!download_status_map.empty()) {
+                            ImGui::Separator();
+                            ImGui::Text("Active downloads:");
+                            std::lock_guard<std::mutex> dlk(download_mutex);
+                            for (auto& p : download_status_map) {
                                 auto& st = p.second;
                                 float frac = 0.0f;
                                 if (st.total > 0) frac = (float)st.transferred / (float)st.total;
@@ -346,8 +480,15 @@ int main()
                                     if (strlen(current_path) > 0 && current_path[0])
                                         full_remote += "/";
                                     full_remote += file.name;
-                                    DownloadFile(server_buf, share_buf, full_remote,
-                                        file.name.c_str(), username_buf, password_buf);
+                                    // enqueue download task so UI remains responsive and we can report progress
+                                    size_t fsize = (size_t)file.size; // may be 0 if unknown
+                                    int id = next_download_id.fetch_add(1);
+                                    {
+                                        std::lock_guard<std::mutex> lk(download_mutex);
+                                        download_tasks.push_back(DownloadTask{ id, full_remote, std::string(file.name), fsize });
+                                        download_status_map[id] = DownloadStatus{ id, full_remote, std::string(file.name), 0, fsize, false, false };
+                                    }
+                                    download_cv.notify_one();
                                 }
                                 else
                                 {
@@ -498,6 +639,7 @@ int main()
                     }
                 }
 
+                ImGui::End();
                 ImGui::Render();
                 glClearColor(0.45f, 0.55f, 0.60f, 1.00f);
                 glClear(GL_COLOR_BUFFER_BIT);
@@ -509,8 +651,10 @@ int main()
             workers_stop = true;
             upload_cv.notify_all();
             delete_cv.notify_all();
+            download_cv.notify_all();
             if (upload_worker_thread.joinable()) upload_worker_thread.join();
             if (delete_worker_thread.joinable()) delete_worker_thread.join();
+            if (download_worker_thread.joinable()) download_worker_thread.join();
 
             ImGui_ImplOpenGL3_Shutdown();
             ImGui_ImplGlfw_Shutdown();
