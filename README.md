@@ -1,4 +1,4 @@
-smb browser
+smb file browser
 
 
 
