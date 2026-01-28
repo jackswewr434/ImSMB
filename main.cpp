@@ -43,7 +43,7 @@ static char local_file_buf[512] = "";
 static bool upload_ready = false;
 // Upload worker structures
 struct UploadTask { int id; std::string local; std::string remote; size_t total_bytes; };
-struct UploadStatus { int id; std::string local; std::string remote; size_t transferred = 0; size_t total; bool done; bool success; };
+struct UploadStatus { int id; std::string local; std::string remote; size_t transferred = 0; size_t total; bool done; bool success; std::chrono::steady_clock::time_point finished_time; };
 static std::deque<UploadTask> upload_tasks;
 static std::map<int, UploadStatus> upload_status_map;
 static std::mutex upload_mutex;
@@ -156,7 +156,11 @@ int main()
                     {
                         std::lock_guard<std::mutex> lk(upload_mutex);
                         auto it = upload_status_map.find(task.id);
-                        if (it != upload_status_map.end()) { it->second.done = true; it->second.success = ok; }
+                        if (it != upload_status_map.end()) {
+                            it->second.done = true;
+                            it->second.success = ok;
+                            it->second.finished_time = std::chrono::steady_clock::now();
+                        }
                     }
                     // track active uploads
                     uploads_in_progress.fetch_sub(1);
@@ -424,7 +428,17 @@ int main()
                                     {
                                         std::lock_guard<std::mutex> lk(upload_mutex);
                                         upload_tasks.push_back(UploadTask{ id, localPath, full_remote, fsize });
-                                        upload_status_map[id] = UploadStatus{ id, localPath, full_remote, 0, fsize, false, false };
+                                        // initialize status entry explicitly so finished_time is defaulted
+                                        upload_status_map[id] = UploadStatus();
+                                        auto &st = upload_status_map[id];
+                                        st.id = id;
+                                        st.local = localPath;
+                                        st.remote = full_remote;
+                                        st.transferred = 0;
+                                        st.total = fsize;
+                                        st.done = false;
+                                        st.success = false;
+                                        st.finished_time = std::chrono::steady_clock::time_point();
                                     }
                                     uploads_in_progress.fetch_add(1);
                                     upload_cv.notify_one();
@@ -441,8 +455,19 @@ int main()
                             ImGui::Separator();
                             ImGui::Text("Active uploads:");
                             std::lock_guard<std::mutex> lk(upload_mutex);
+                                // hide completed uploads after a short delay
+                                auto now = std::chrono::steady_clock::now();
+                                const auto hide_after = std::chrono::seconds(5);
+                                std::vector<int> to_erase;
                                 for (auto& p : upload_status_map) {
                                     auto& st = p.second;
+                                    if (st.done) {
+                                        if (st.finished_time != std::chrono::steady_clock::time_point() && (now - st.finished_time) > hide_after) {
+                                            to_erase.push_back(p.first);
+                                            continue;
+                                        }
+                                    }
+
                                     float frac = 0.0f;
                                     if (st.total > 0) frac = (float)st.transferred / (float)st.total;
                                     // show filename and numeric progress for debugging
@@ -454,6 +479,7 @@ int main()
                                     ImGui::ProgressBar(frac, ImVec2(-1, 0));
                                     if (st.done) ImGui::Text(st.success ? "Done" : "Failed");
                                 }
+                                for (int id : to_erase) upload_status_map.erase(id);
                         }
 
                         // Active downloads
