@@ -22,14 +22,6 @@ A desktop app for browsing and managing files on network drives. Easily upload, 
 - **Rounding Controls**: Adjust frame, window, and scrollbar rounding parameters
 - **Style Serialization**: Read/write theme files with color and rounding data
 
-### Thread Safety
-
-
-- **Upload Queue**: Managed by `upload_mutex` with condition variable signaling
-- **Download Queue**: Managed by `download_mutex` for concurrent operations
-- **Delete Queue**: Managed by `delete_mutex` for safe recursive deletions
-- **Status Tracking**: Maps store per-task progress and completion status
-
 ## Building & Dependencies
 
 ### Build Requirements
