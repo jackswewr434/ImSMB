@@ -1,4 +1,4 @@
-smb file browser
+smb file browser for Linux ( compiled on arch btw :sweat_smile: )
 
 
 
