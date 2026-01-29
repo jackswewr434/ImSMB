@@ -3,6 +3,7 @@
 #include <sstream>
 #include <vector>
 #include <string>
+#include <cstdio>
 
 void SaveStyle(const char* path){
     ImGuiStyle& style = ImGui::GetStyle();
@@ -88,44 +89,38 @@ void showSettingsTab(){
             }
             if(ImGui::CollapsingHeader("Colors")){
                 ImGui::Text("Modify Colors:");
-                if(ImGui::ColorEdit4("Title Background Color", (float*)&titlebg.x, ImGuiColorEditFlags_AlphaBar)) {
-                }
-                if(ImGui::ColorEdit4("Title Background Active Color", (float*)&titlebgActive.x, ImGuiColorEditFlags_AlphaBar)) {
-                }
-                if (ImGui::ColorEdit4("Button Color", (float*)&buttonCol.x, ImGuiColorEditFlags_AlphaBar)) {
-                }
-                if(ImGui::ColorEdit4("Button Hovered Color", (float*)&buttonHov.x, ImGuiColorEditFlags_AlphaBar)) {
-                }
-                if(ImGui::ColorEdit4("Button Active Color", (float*)&buttonAct.x, ImGuiColorEditFlags_AlphaBar)) {
-                }
-                if (ImGui::ColorEdit4("Window Background Color", (float*)&windowBgCol.x, ImGuiColorEditFlags_AlphaBar)) {
-                }
-                if (ImGui::ColorEdit4("Frame Background Color", (float*)&frameBgCol.x, ImGuiColorEditFlags_AlphaBar)) {
-                }
-                if (ImGui::ColorEdit4("Scrollbar Background Color", (float*)&scrollBgCol.x, ImGuiColorEditFlags_AlphaBar)) {
-                }
-                if (ImGui::ColorEdit4("Scrollbar Grab Color", (float*)&scrollGrabCol.x, ImGuiColorEditFlags_AlphaBar)) {
-                }
-                if(ImGui::ColorEdit4("Scrollbar Grab Hovered Color", (float*)&scrollGrabHovCol.x, ImGuiColorEditFlags_AlphaBar)) {
-                }
-                if(ImGui::ColorEdit4("Scrollbar Grab Active Color", (float*)&scrollGrabActCol.x, ImGuiColorEditFlags_AlphaBar)) {
-                }
-                if(ImGui::ColorEdit4("Collapsing Header Color", (float*)&collapseHead.x, ImGuiColorEditFlags_AlphaBar)) {
-                }
-                if(ImGui::ColorEdit4("Collapsing Header Active Color", (float*)&collapseHeadActive.x, ImGuiColorEditFlags_AlphaBar)) {
-                }
-                if(ImGui::ColorEdit4("Collapsing Header Hovered Color", (float*)&collapseHeadHover.x, ImGuiColorEditFlags_AlphaBar)) {
-                }
-                if(ImGui::ColorEdit4("Progress Bar Color", (float*)&ProgressBar.x, ImGuiColorEditFlags_AlphaBar)) {
-                }
-                if(ImGui::ColorEdit4("Progress Bar Hovered Color", (float*)&style.Colors[ImGuiCol_PlotHistogramHovered].x, ImGuiColorEditFlags_AlphaBar)) {
-                }
-                if(ImGui::ColorEdit4("Text Color", (float*)&style.Colors[ImGuiCol_Text].x, ImGuiColorEditFlags_AlphaBar)) {
-                }
-                if(ImGui::ColorEdit4("Text Disabled Color", (float*)&style.Colors[ImGuiCol_TextDisabled].x, ImGuiColorEditFlags_AlphaBar)) {
-                }
-                if(ImGui::ColorEdit4("Border Color", (float*)&style.Colors[ImGuiCol_Border].x, ImGuiColorEditFlags_AlphaBar)) {
-                }
+                auto show_picker = [](const char* label, ImVec4& col){
+                    char btnid[128]; char popid[128];
+                    snprintf(btnid, sizeof(btnid), "btn_%s", label);
+                    snprintf(popid, sizeof(popid), "pop_%s", label);
+                    ImGui::TextUnformatted(label);
+                    ImGui::SameLine(260);
+                    if (ImGui::ColorButton(btnid, col, ImGuiColorEditFlags_AlphaPreviewHalf, ImVec2(48,18))) ImGui::OpenPopup(popid);
+                    if (ImGui::BeginPopup(popid)){
+                        ImGui::ColorPicker4("##picker", (float*)&col.x, ImGuiColorEditFlags_AlphaBar);
+                        ImGui::EndPopup();
+                    }
+                };
+
+                show_picker("Title Background Color", titlebg);
+                show_picker("Title Background Active Color", titlebgActive);
+                show_picker("Button Color", buttonCol);
+                show_picker("Button Hovered Color", buttonHov);
+                show_picker("Button Active Color", buttonAct);
+                show_picker("Window Background Color", windowBgCol);
+                show_picker("Frame Background Color", frameBgCol);
+                show_picker("Scrollbar Background Color", scrollBgCol);
+                show_picker("Scrollbar Grab Color", scrollGrabCol);
+                show_picker("Scrollbar Grab Hovered Color", scrollGrabHovCol);
+                show_picker("Scrollbar Grab Active Color", scrollGrabActCol);
+                show_picker("Collapsing Header Color", collapseHead);
+                show_picker("Collapsing Header Active Color", collapseHeadActive);
+                show_picker("Collapsing Header Hovered Color", collapseHeadHover);
+                show_picker("Progress Bar Color", ProgressBar);
+                show_picker("Progress Bar Hovered Color", style.Colors[ImGuiCol_PlotHistogramHovered]);
+                show_picker("Text Color", style.Colors[ImGuiCol_Text]);
+                show_picker("Text Disabled Color", style.Colors[ImGuiCol_TextDisabled]);
+                show_picker("Border Color", style.Colors[ImGuiCol_Border]);
             }
             if(ImGui::Button("Save Theme")){
                 SaveStyle("theme.cfg");

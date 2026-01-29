@@ -1,3 +1,9 @@
 *.txt
 .bash_history
 *.log
+*.gif
+*.png
+*.jpg
+*.jpeg
+*.mp4
+*.mov

@@ -1,8 +1,4 @@
 /*
-    IMPORTANT!!! TODO:
-        Fix upload. idk wtf went wrong [ ]
-        DONT DELETE THIS DIRECTORY [ ]
-
         Made by Jackson Andrawis (jacksonandrawis@gmail.com) 2026
 */
 #include <GL/glew.h>
