@@ -586,9 +586,8 @@ int main()
             if (!file_list.empty())
             {
                 ImGui::BeginChild("FileList", ImVec2(0, 200), true);
-                // two columns: name and actions
-                ImGui::Columns(2, "files_cols", false);
-                ImGui::SetColumnWidth(1, 120);
+                // single column: name (actions inline)
+                ImGui::Columns(1, "files_cols", false);
                 for (size_t idx = 0; idx < file_list.size(); ++idx)
                 {
                     const auto &file = file_list[idx];
@@ -651,7 +650,6 @@ int main()
 
                     if (ImGui::BeginPopup("file_ctx"))
                     {
-                        printf("[CTX DEBUG] file_ctx popup opened for '%s'\n", file.name.c_str());
                         if (ImGui::MenuItem("Rename"))
                         {
                             // prepare rename state and close the small popup; open modal next frame
