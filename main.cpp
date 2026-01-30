@@ -1,6 +1,9 @@
 /*
         Made by Jackson Andrawis (jacksonandrawis@gmail.com) 2026
 */
+
+
+
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
 #define GLFW_EXPOSE_NATIVE_X11
@@ -21,7 +24,6 @@
 #include <map>
 #include <chrono>
 #include <filesystem>
-#include "styles.h"
 #include "settings.h"
 #include "images.h"
 #include "image_utils.h"
