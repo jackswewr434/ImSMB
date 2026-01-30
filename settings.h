@@ -1,9 +1,34 @@
+#pragma once
+
 #include "imgui/imgui.h"
 #include <fstream>
 #include <sstream>
 #include <vector>
 #include <string>
 #include <cstdio>
+#include <cstring>
+
+
+std::string downloadPath = "";
+static char downloadPathBuffer[256] = "";
+
+// Config file handlers (for non-theme settings like download path)
+void SaveConfig(const char* path) {
+    std::ofstream f(path);
+    if(!f) return;
+    downloadPath = downloadPathBuffer;  // sync from buffer to string
+    f << downloadPath << '\n';
+    f.close();
+}
+
+void LoadConfig(const char* path) {
+    std::ifstream f(path);
+    if(!f) return;
+    std::getline(f, downloadPath);
+    strncpy(downloadPathBuffer, downloadPath.c_str(), sizeof(downloadPathBuffer) - 1);
+    downloadPathBuffer[sizeof(downloadPathBuffer) - 1] = '\0';
+    f.close();
+}
 
 void SaveStyle(const char* path){
     ImGuiStyle& style = ImGui::GetStyle();
@@ -125,5 +150,15 @@ void showSettingsTab(){
             if(ImGui::Button("Save Theme")){
                 SaveStyle("theme.cfg");
             }
+            
+            if(ImGui::Button("Load Theme")){
+                LoadStyle("theme.cfg");
+            }
     } 
+    if(ImGui::CollapsingHeader("File Locations")){
+        if(ImGui::InputText("File Path", downloadPathBuffer, sizeof(downloadPathBuffer))){
+            SaveConfig("config.cfg");
+        }
+        ImGui::Text("(saves automatically), if blank goes to program dir");
+    }
 }

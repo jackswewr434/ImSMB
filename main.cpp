@@ -84,6 +84,7 @@ struct DownloadStatus
     size_t total;
     bool done;
     bool success;
+    std::chrono::steady_clock::time_point finished_time;
 };
 static std::deque<DownloadTask> download_tasks;
 static std::map<int, DownloadStatus> download_status_map;
@@ -144,6 +145,10 @@ int main()
     else
     {
         ImGui::StyleColorsDark();
+    }
+    if (file_exists_fopen("config.cfg"))
+    {
+        LoadConfig("config.cfg");
     }
     ImGui_ImplGlfw_InitForOpenGL(window, true);
     ImGui_ImplOpenGL3_Init("#version 330");
@@ -264,7 +269,11 @@ int main()
                         {
                             std::lock_guard<std::mutex> lk(download_mutex);
                             auto it = download_status_map.find(task.id);
-                            if (it != download_status_map.end()) { it->second.done = true; it->second.success = ok; }
+                            if (it != download_status_map.end()) { 
+                                it->second.done = true; 
+                                it->second.success = ok;
+                                it->second.finished_time = std::chrono::steady_clock::now();
+                            }
                         }
                     } });
 
@@ -577,25 +586,48 @@ int main()
                     for (int id : to_erase)
                         upload_status_map.erase(id);
                 }
+            }
 
-                // Active downloads
-                if (!download_status_map.empty())
+            // Active downloads (independent of upload UI)
+            if (!download_status_map.empty())
+            {
+                ImGui::Separator();
+                ImGui::Text("Active downloads:");
+                std::lock_guard<std::mutex> dlk(download_mutex);
+                auto now = std::chrono::steady_clock::now();
+                const auto hide_after = std::chrono::seconds(5);
+                std::vector<int> dl_to_erase;
+                for (auto &p : download_status_map)
                 {
-                    ImGui::Separator();
-                    ImGui::Text("Active downloads:");
-                    std::lock_guard<std::mutex> dlk(download_mutex);
-                    for (auto &p : download_status_map)
+                    auto &st = p.second;
+                    if (st.done)
                     {
-                        auto &st = p.second;
-                        float frac = 0.0f;
-                        if (st.total > 0)
-                            frac = (float)st.transferred / (float)st.total;
-                        ImGui::Text("%s", st.local.c_str());
-                        ImGui::ProgressBar(frac, ImVec2(-1, 0));
-                        if (st.done)
-                            ImGui::Text(st.success ? "Done" : "Failed");
+                        if (st.finished_time != std::chrono::steady_clock::time_point() && (now - st.finished_time) > hide_after)
+                        {
+                            dl_to_erase.push_back(p.first);
+                            continue;
+                        }
                     }
+                    
+                    float frac = 0.0f;
+                    if (st.total > 0)
+                        frac = (float)st.transferred / (float)st.total;
+                    
+                    // show filename and numeric progress
+                    if (st.total > 0)
+                    {
+                        ImGui::Text("%s (%zu / %zu bytes)", st.remote.c_str(), st.transferred, st.total);
+                    }
+                    else
+                    {
+                        ImGui::Text("%s (%zu bytes)", st.remote.c_str(), st.transferred);
+                    }
+                    ImGui::ProgressBar(frac, ImVec2(-1, 0));
+                    if (st.done)
+                        ImGui::Text(st.success ? "Done" : "Failed");
                 }
+                for (int id : dl_to_erase)
+                    download_status_map.erase(id);
             }
 
             if (!file_list.empty())
@@ -629,7 +661,7 @@ int main()
                             {
                                 std::lock_guard<std::mutex> lk(download_mutex);
                                 download_tasks.push_back(DownloadTask{id, full_remote, std::string(file.name), fsize});
-                                download_status_map[id] = DownloadStatus{id, full_remote, std::string(file.name), 0, fsize, false, false};
+                                download_status_map[id] = DownloadStatus{id, full_remote, std::string(file.name), 0, fsize, false, false, std::chrono::steady_clock::time_point()};
                             }
                             download_cv.notify_one();
                         }

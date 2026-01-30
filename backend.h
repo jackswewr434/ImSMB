@@ -14,6 +14,10 @@
 #include <filesystem>
 #include <sstream>
 #include <mutex>
+#include <sys/stat.h>
+#include "settings.h"
+
+
 
 int file_exists_fopen(const char *filename) {
     FILE *file;
@@ -171,7 +175,16 @@ std::vector<SMBFileInfo> ListSMBFiles(const std::string& server, const std::stri
         SMBFileInfo info;
         info.name = dirent->name;
         info.is_dir = (dirent->smbc_type == SMBC_DIR); 
-        info.size = 0;  
+        info.size = 0;
+        
+        // Get file size via stat if it's a file
+        if (!info.is_dir) {
+            std::string file_url = smb_url + "/" + UrlEncode(info.name);
+            struct stat st;
+            if (smbc_stat(file_url.c_str(), &st) == 0) {
+                info.size = st.st_size;
+            }
+        }
         
         files.push_back(info);
     }
@@ -195,7 +208,17 @@ bool DownloadFile(const std::string& server, const std::string& share,
     int fd = smbc_open(smb_url.c_str(), O_RDONLY, 0);
     if (fd == -1) return false;
     
-    std::ofstream out(localFile, std::ios::binary);
+    // Determine final download path
+    std::string final_path;
+    if (downloadPath.empty()) {
+        final_path = localFile;
+    } else {
+        final_path = downloadPath + "/" + localFile;
+        // Ensure download directory exists
+        std::filesystem::create_directories(downloadPath);
+    }
+    
+    std::ofstream out(final_path, std::ios::binary);
     if (!out.is_open()) {
         smbc_close(fd);
         return false;
@@ -231,10 +254,20 @@ bool DownloadFileWithProgress(const std::string& server, const std::string& shar
         return false;
     }
 
-    std::ofstream out(localFile, std::ios::binary);
+    // Determine final download path
+    std::string final_path;
+    if (downloadPath.empty()) {
+        final_path = localFile;
+    } else {
+        final_path = downloadPath + "/" + localFile;
+        // Ensure download directory exists
+        std::filesystem::create_directories(downloadPath);
+    }
+
+    std::ofstream out(final_path, std::ios::binary);
     if (!out.is_open()) {
         smbc_close(fd);
-        printf("DownloadFileWithProgress: failed to open local '%s' for writing\n", localFile.c_str());
+        printf("DownloadFileWithProgress: failed to open local '%s' for writing\n", final_path.c_str());
         return false;
     }
 
