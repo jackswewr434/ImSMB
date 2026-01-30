@@ -20,7 +20,6 @@ An app for linux, for browsing and managing files on network drives. Easily uplo
 - **Theme Persistence**: Save and load ImGui theme configurations
 - **Color Customization**: Full ImGui color palette editing
 - **Rounding Controls**: Adjust frame, window, and scrollbar rounding parameters
-- **Style Serialization**: Read/write theme files with color and rounding data
 
 ## Building & Dependencies
 
