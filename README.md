@@ -1,6 +1,6 @@
 # ImSMB
 
-A desktop app for browsing and managing files on network drives. Easily upload, download, and organize files from SMB shares with a simple, clean interface.
+An app for linux, for browsing and managing files on network drives. Easily upload, download, and organize files from SMB shares with a simple, clean interface.
 
 
 
@@ -84,4 +84,5 @@ Each file operation (upload/download) generates:
 - **GLEW** - OpenGL extensions
 - **libsmbclient** - Samba client library
 - **stb_image** - Image decoding
+
 
