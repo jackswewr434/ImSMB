@@ -48,7 +48,7 @@ sudo dnf install glfw-devel glew-devel samba-devel
 ## Usage
 
 ### Connecting to an SMB Share
-1. Launch the application: `./LIN` (or compiled executable)
+1. Launch the application: `./SMBViewer` (you can edit executable name in ` compile `)
 2. Browse and navigate directories in the SMB Browser tab
 
 ### File Operations
@@ -86,5 +86,6 @@ Each file operation (upload/download) generates:
 ### Screenshots
 <img width="1292" height="833" alt="Screenshot_20260129_191141" src="https://github.com/user-attachments/assets/18ca6f1a-76ff-4d9f-a79e-2fef8f1b0144" />
 <img width="1292" height="833" alt="Screenshot_20260129_191206" src="https://github.com/user-attachments/assets/2261f24b-1040-40ba-9845-a2c76440e28a" />
+
 
 
