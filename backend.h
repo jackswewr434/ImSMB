@@ -16,7 +16,7 @@
 #include <mutex>
 #include <sys/stat.h>
 #include "settings.h"
-
+#include "image_utils.h"
 int file_exists_fopen(const char *filename) {
     FILE *file;
     // Try to open the file in read mode ("r")
@@ -28,7 +28,56 @@ int file_exists_fopen(const char *filename) {
         // If fopen returns NULL, the file does not exist or an error occurred
         return 0;
     }
-}                                                                                           
+}                                   
+
+bool LoadTextureFromFile(const char* file_name, GLuint* out_texture, int* out_width, int* out_height)
+{
+    FILE* f = fopen(file_name, "rb");
+    if (f == NULL)
+        return false;
+
+    fseek(f, 0, SEEK_END);
+    long fsize = ftell(f);
+    if (fsize < 0) {
+        fclose(f);
+        return false;
+    }
+    fseek(f, 0, SEEK_SET);
+
+    size_t file_size = (size_t)fsize;
+    void* file_data = IM_ALLOC(file_size);
+    if (!file_data) {
+        fclose(f);
+        return false;
+    }
+
+    size_t rd = fread(file_data, 1, file_size, f);
+    fclose(f);
+    if (rd != file_size) {
+        IM_FREE(file_data);
+        return false;
+    }
+
+    // Only change is here: cast and capture GLuint
+    GLuint tex = LoadTextureFromMemory(
+        (const unsigned char*)file_data,
+        file_size
+    );
+
+    IM_FREE(file_data);
+
+    if (tex == 0)
+        return false;
+
+    *out_texture = tex;
+
+    // If you have no way to get w/h, at least set something sane/non-zero or 0,0
+    if (out_width)  *out_width  = 800;
+    if (out_height) *out_height = 600;
+    *out_texture = tex;
+    return true;
+}
+
 std::string bytesToSize(uint64_t amount){
  const char* sizes[] = { "B", "KB", "MB", "GB", "TB" };
     int order = 0;
@@ -250,7 +299,36 @@ bool DownloadFileWithProgress(const std::string& server, const std::string& shar
     return bytes >= 0;
 }
 
-
+//only used for silent downloading such as picture loading for previews 
+bool DownloadFile(const std::string& server, const std::string& share, 
+                  const std::string& path, const std::string& localFile,
+                  const std::string& username, const std::string& password) {
+    g_smb_username = username;
+    g_smb_password = password;
+    smbc_init(auth_fn, 1);
+    
+    std::string smb_url = "smb://" + server + "/" + share + "/" + path;
+    
+    // Returns int fd (NOT SMBCFILE*)
+    int fd = smbc_open(smb_url.c_str(), O_RDONLY, 0);
+    if (fd == -1) return false;
+    
+    std::ofstream out(localFile, std::ios::binary);
+    if (!out.is_open()) {
+        smbc_close(fd);
+        return false;
+    }
+    
+    char buffer[4096];
+    ssize_t bytes;
+    while ((bytes = smbc_read(fd, buffer, sizeof(buffer))) > 0) {
+        out.write(buffer, bytes);
+    }
+    
+    out.close();
+    smbc_close(fd);
+    return true;
+}
 // Upload with progress callback: calls progress_cb(bytes_written) after each chunk written.
 bool UploadFileWithProgress(const std::string& server, const std::string& share,
                             const std::string& remotePath, const std::string& localFile,

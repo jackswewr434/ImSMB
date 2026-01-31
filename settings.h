@@ -12,7 +12,7 @@ extern char share_buf[64];
 extern char username_buf[64];
 extern char password_buf[64];
 
-std::string downloadPath = "";
+extern std::string downloadPath = "";
 static char downloadPathBuffer[256] = "";
 // Config file handlers (for non-theme settings like download path)
 void SaveConfig(const char* path) {
@@ -28,7 +28,6 @@ void SaveConfig(const char* path) {
     f << share_buf      << '\n';
     f << username_buf   << '\n';
     f << password_buf   << '\n';
-    std::cout << server_buf << " " << share_buf << " " << username_buf << " " << password_buf << " " << std::endl;
 }
 
 void LoadConfig(const char* path) {

@@ -2,8 +2,6 @@
         Made by Jackson Andrawis (jacksonandrawis@gmail.com) 2026
 */
 
-
-
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
 #define GLFW_EXPOSE_NATIVE_X11
@@ -27,11 +25,11 @@
 #include "settings.h"
 #include "images.h"
 #include "image_utils.h"
-//TODO MAKE THIS BE INTO A CONFIG 
+// TODO MAKE THIS BE INTO A CONFIG
 static std::vector<SMBFileInfo> file_list;
 static char current_path[512] = "";
-char server_buf[64]   = "";
-char share_buf[64]    = "";
+char server_buf[64] = "";
+char share_buf[64] = "";
 char username_buf[64] = "";
 char password_buf[64] = "";
 // bool tabs
@@ -69,7 +67,13 @@ static std::atomic<bool> workers_stop{false};
 static bool upload_show_active = false; // keep upload UI visible until next upload attempt
 static std::atomic<int> uploads_in_progress{0};
 static std::atomic<bool> refresh_listing_after_upload{false};
-
+static GLuint img_tex;
+static int img_width = 0;
+static int img_height = 0;
+static std::string current_image_path;
+static std::string current_full_remote;
+static size_t current_file_size = 0;
+static bool show_image_popup = false;
 // Download worker structures
 struct DownloadTask
 {
@@ -222,7 +226,7 @@ int main()
 
     // Start delete worker
     delete_worker_thread = std::thread([&]()
-    {
+                                       {
         while (!workers_stop) {
             DeleteTask dt;
             {
@@ -242,8 +246,7 @@ int main()
                     refresh_listing_after_delete.store(true);
                 }
             }
-        }
-    });
+        } });
 
     // Start download worker
     download_worker_thread = std::thread([]()
@@ -284,14 +287,14 @@ int main()
     while (!glfwWindowShouldClose(window))
     {
         glfwPollEvents();
-        
+
         // Refresh listing if deletes completed
         if (refresh_listing_after_delete.exchange(false))
         {
             file_list = ListSMBFiles(server_buf, share_buf, current_path, username_buf, password_buf);
             printf("Refreshed listing after deletes completed\n");
         }
-        
+
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
@@ -301,21 +304,21 @@ int main()
         ImGui::SetNextWindowSize(vp->Size);
         ImGuiWindowFlags host_flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoBringToFrontOnFocus;
         ImGui::Begin("SMB Browser", NULL, host_flags);
-if (ImGui::Button("SMB Browser"))
-{
-    smbBrowsing = !smbBrowsing;
-    if (smbBrowsing)
-        settingsTab = false;
-}
+        if (ImGui::Button("SMB Browser"))
+        {
+            smbBrowsing = !smbBrowsing;
+            if (smbBrowsing)
+                settingsTab = false;
+        }
 
-ImGui::SameLine();
+        ImGui::SameLine();
 
-if (ImGui::Button("Settings"))
-{
-    settingsTab = !settingsTab;
-    if (settingsTab)
-        smbBrowsing = false;
-}
+        if (ImGui::Button("Settings"))
+        {
+            settingsTab = !settingsTab;
+            if (settingsTab)
+                smbBrowsing = false;
+        }
         if (settingsTab)
         {
             smbBrowsing = false;
@@ -335,7 +338,7 @@ if (ImGui::Button("Settings"))
                 file_list = ListSMBFiles(server_buf, share_buf, "", username_buf, password_buf);
                 printf("Connected, found %zu files\n", file_list.size());
             }
-
+            ImGui::SameLine();
             if (ImGui::Button("Back") && strlen(current_path) > 0)
             {
                 char *last_slash = strrchr(current_path, '/');
@@ -349,10 +352,13 @@ if (ImGui::Button("Settings"))
                 }
                 file_list = ListSMBFiles(server_buf, share_buf, current_path, username_buf, password_buf);
             }
-
+            ImGui::SameLine();
+            if (ImGui::Button("Refresh"))
+            {
+                file_list = ListSMBFiles(server_buf, share_buf, current_path, username_buf, password_buf);
+            }
             ImGui::SameLine();
             ImGui::Text("Current: %s", current_path);
-
             // DRAG & DROP ZONE WITH DEBUG
             ImGui::Separator();
 
@@ -566,9 +572,10 @@ if (ImGui::Button("Settings"))
                             ImGui::Text("%s (%zu bytes)", st.local.c_str(), st.transferred);
                         }
                         ImGui::ProgressBar(frac, ImVec2(-1, 0));
-                        if (st.done){
+                        if (st.done)
+                        {
                             ImGui::Text(st.success ? "Done" : "Failed");
-                            //relist 
+                            // relist
                             file_list = ListSMBFiles(server_buf, share_buf, current_path, username_buf, password_buf);
                         }
                     }
@@ -597,11 +604,11 @@ if (ImGui::Button("Settings"))
                             continue;
                         }
                     }
-                    
+
                     float frac = 0.0f;
                     if (st.total > 0)
                         frac = (float)st.transferred / (float)st.total;
-                    
+
                     // show filename and numeric progress
                     if (st.total > 0)
                     {
@@ -641,27 +648,12 @@ if (ImGui::Button("Settings"))
                         ImGui::Image((void *)(intptr_t)icon, ImVec2(16, 16));
                         ImGui::SameLine();
                     }
-                    if(!file.is_dir){
-                        size_string = file.name + ", " + bytesToSize(file.size);
-                    }
-                    else{
-                        size_string = file.name;
-                    }
+                    size_string = file.is_dir ? file.name : (file.name + ", " + bytesToSize(file.size));
                     if (ImGui::Selectable(size_string.c_str(), false, 0, ImVec2(0, 0)))
                     {
-                        if (!file.is_dir)
+                        if (file.is_dir)
                         {
-                            size_t fsize = (size_t)file.size;
-                            int id = next_download_id.fetch_add(1);
-                            {
-                                std::lock_guard<std::mutex> lk(download_mutex);
-                                download_tasks.push_back(DownloadTask{id, full_remote, std::string(file.name), fsize});
-                                download_status_map[id] = DownloadStatus{id, full_remote, std::string(file.name), 0, fsize, false, false, std::chrono::steady_clock::time_point()};
-                            }
-                            download_cv.notify_one();
-                        }
-                        else
-                        {
+                            // Navigate to directory
                             std::string new_path = std::string(current_path);
                             if (strlen(current_path) > 0 && current_path[0])
                                 new_path += "/";
@@ -669,10 +661,58 @@ if (ImGui::Button("Settings"))
                             strncpy(current_path, new_path.c_str(), sizeof(current_path) - 1);
                             file_list = ListSMBFiles(server_buf, share_buf, current_path, username_buf, password_buf);
                         }
+                        else if (file.name.find(".png") != std::string::npos)
+                        {
+                            std::string local_tmp = "/tmp/" + std::string(file.name);
+                            if (DownloadFile(server_buf, share_buf, full_remote, local_tmp, username_buf, password_buf))
+                            {
+                                // CLEANUP OLD TEXTURE FIRST
+                                if (img_tex != 0)
+                                {
+                                    glDeleteTextures(1, &img_tex);
+                                    img_tex = 0;
+                                }
+
+                                // LOAD TEXTURE ONCE HERE (CORRECT CALL)
+                                GLuint temp_tex = 0;
+                                if (LoadTextureFromFile(local_tmp.c_str(), &temp_tex, &img_width, &img_height))
+                                {
+                                    img_tex = temp_tex;
+                                    current_image_path = local_tmp;
+                                    current_full_remote = full_remote;
+                                    current_file_size = file.size;
+                                    show_image_popup = true;
+                                }
+                            }
+                        }
+                        else
+                        {
+                            // Other files: download
+                            size_t fsize = (size_t)file.size;
+                            int id = next_download_id.fetch_add(1);
+                            {
+                                std::lock_guard<std::mutex> lk(download_mutex);
+                                download_tasks.push_back(DownloadTask{
+                                    id,
+                                    full_remote,
+                                    std::string(file.name),
+                                    fsize});
+                                download_status_map[id] = DownloadStatus{
+                                    id,
+                                    full_remote,
+                                    std::string(file.name),
+                                    0,
+                                    fsize,
+                                    false,
+                                    false,
+                                    std::chrono::steady_clock::time_point()};
+                            }
+                            download_cv.notify_one();
+                        }
                     }
                     ImGui::SameLine();
-                    //ImGui::Text((const char*)(sizeof(file)));
-                    // context menu for this item (right-click) — attach to the Selectable above
+                    // ImGui::Text((const char*)(sizeof(file)));
+                    //  context menu for this item (right-click) — attach to the Selectable above
                     if (ImGui::IsItemClicked(ImGuiMouseButton_Right))
                     {
                         printf("[CTX DEBUG] Right-click detected on '%s'\n", file.name.c_str());
@@ -702,7 +742,7 @@ if (ImGui::Button("Settings"))
                             rename_open = true;
                             ImGui::CloseCurrentPopup();
                         }
-                        if(ImGui::MenuItem("Delete"))
+                        if (ImGui::MenuItem("Delete"))
                         {
                             pending_delete_remote = full_remote;
                             pending_delete_is_dir = file.is_dir;
@@ -715,7 +755,6 @@ if (ImGui::Button("Settings"))
                     ImGui::NextColumn();
 
                     // actions column: delete button
-
 
                     ImGui::EndGroup();
                     ImGui::PopID();
@@ -794,7 +833,6 @@ if (ImGui::Button("Settings"))
                                 for (const auto &sd : staged_deletes)
                                 {
                                     DeleteRecursive(server_buf, share_buf, sd.temp, username_buf, password_buf);
-
                                 }
                                 staged_deletes.clear();
                                 file_list = ListSMBFiles(server_buf, share_buf, current_path, username_buf, password_buf);
@@ -861,7 +899,72 @@ if (ImGui::Button("Settings"))
                     ImGui::OpenPopup("Alert!");
                     rename_open = false;
                 }
+                if (show_image_popup)
+                {
+                    ImGui::SetNextWindowSize(ImVec2(800, 600), ImGuiCond_FirstUseEver);
+                    ImGui::OpenPopup("ImageViewer");
+                }
+                if (ImGui::BeginPopupModal("ImageViewer", &show_image_popup, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize))
+                {
+                    ImGui::Text("Viewing: %s", current_image_path.c_str());
+                    GLuint temp_tex = 0;
+                    if (LoadTextureFromFile(current_image_path.c_str(), &temp_tex, &img_width, &img_height))
+                    {
+                        img_tex = temp_tex;
+                    }
 
+                    // Use actual image size, scaled to fit window (or keep 580x360 if you prefer)
+                    float display_w = (float)ImGui::GetContentRegionAvail().x;
+                    float display_h = (float)ImGui::GetContentRegionAvail().y - ImGui::GetCursorPosY();
+                    float img_ratio = (float)img_width / (float)img_height;
+                    float window_ratio = display_w / display_h;
+
+                    ImVec2 display_size;
+                    if (img_ratio > window_ratio)
+                    {
+                        display_size = ImVec2(display_w, display_w / img_ratio);
+                    }
+                    else
+                    {
+                        display_size = ImVec2(display_h * img_ratio, display_h);
+                    }
+
+                    if (img_tex != 0)
+                    {
+                        ImGui::Image((void *)(intptr_t)img_tex, display_size);
+                    }
+
+                    ImGui::Dummy(ImVec2(0.0f, 20.0f));
+                    if (ImGui::Button("Close", ImVec2(120, 0)))
+                    {
+                        show_image_popup = false;
+                    }
+                    ImGui::SameLine();
+                    if(ImGui::Button("Download"))
+                    {
+                        // download to current working directory
+                        std::string local_save = "./" + current_full_remote.substr(current_full_remote.find_last_of('/') + 1);
+                        if (DownloadFile(server_buf, share_buf, current_full_remote, downloadPath + "/" + local_save, username_buf, password_buf))
+                        {
+                            printf("Downloaded '%s' to '%s'\n", current_full_remote.c_str(), (downloadPath + "/" + local_save).c_str());
+                        }
+                        else
+                        {
+                            printf("Failed to download '%s'\n", current_full_remote.c_str());
+                        }
+                    }
+                    ImGui::EndPopup();
+
+                    // Cleanup texture when popup closes (do this in your cleanup/render loop)
+                    if (!show_image_popup && img_tex != 0)
+                    {
+                        glDeleteTextures(1, &img_tex);
+                        img_tex = 0;
+                        img_width = 0;
+                        img_height = 0;
+                        current_image_path.clear();
+                    }
+                }
                 // Rename modal
                 if (ImGui::BeginPopupModal("Alert!", NULL, ImGuiWindowFlags_AlwaysAutoResize))
                 {
