@@ -661,7 +661,7 @@ int main()
                             strncpy(current_path, new_path.c_str(), sizeof(current_path) - 1);
                             file_list = ListSMBFiles(server_buf, share_buf, current_path, username_buf, password_buf);
                         }
-                        else if (file.name.find(".png") != std::string::npos)
+                        else if (file.name.find(".png") != std::string::npos || file.name.find(".jpg") != std::string::npos || file.name.find(".jpeg") != std::string::npos)
                         {
                             std::string local_tmp = "/tmp/" + std::string(file.name);
                             if (DownloadFile(server_buf, share_buf, full_remote, local_tmp, username_buf, password_buf))
@@ -902,68 +902,60 @@ int main()
                 if (show_image_popup)
                 {
                     ImGui::SetNextWindowSize(ImVec2(800, 600), ImGuiCond_FirstUseEver);
-                    ImGui::OpenPopup("ImageViewer");
+                    ImVec2 center = ImGui::GetMainViewport()->GetCenter();
+                    ImGui::SetNextWindowPos(center, ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+                    ImGui::OpenPopup("Image Viewer");
                 }
-                if (ImGui::BeginPopupModal("ImageViewer", &show_image_popup, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize))
+                if (ImGui::BeginPopupModal("Image Viewer", &show_image_popup, ImGuiWindowFlags_NoMove))
                 {
                     ImGui::Text("Viewing: %s", current_image_path.c_str());
-                    GLuint temp_tex = 0;
-                    if (LoadTextureFromFile(current_image_path.c_str(), &temp_tex, &img_width, &img_height))
-                    {
-                        img_tex = temp_tex;
-                    }
 
-                    // Use actual image size, scaled to fit window (or keep 580x360 if you prefer)
-                    float display_w = (float)ImGui::GetContentRegionAvail().x;
-                    float display_h = (float)ImGui::GetContentRegionAvail().y - ImGui::GetCursorPosY();
-                    float img_ratio = (float)img_width / (float)img_height;
-                    float window_ratio = display_w / display_h;
+                    // NO TEXTURE LOADING HERE - use already loaded img_tex/img_width/img_height
 
-                    ImVec2 display_size;
-                    if (img_ratio > window_ratio)
+                    if (img_width > 0 && img_height > 0 && img_tex != 0)
                     {
-                        display_size = ImVec2(display_w, display_w / img_ratio);
-                    }
-                    else
-                    {
-                        display_size = ImVec2(display_h * img_ratio, display_h);
-                    }
+                        float display_w = (float)ImGui::GetContentRegionAvail().x;
+                        float display_h = (float)ImGui::GetContentRegionAvail().y - ImGui::GetCursorPosY();
+                        float img_ratio = (float)img_width / (float)img_height;
+                        float window_ratio = display_w / display_h;
 
-                    if (img_tex != 0)
-                    {
+                        ImVec2 display_size;
+                        if (img_ratio > window_ratio)
+                        {
+                            display_size = ImVec2(display_w, display_w / img_ratio);
+                        }
+                        else
+                        {
+                            display_size = ImVec2(display_h * img_ratio, display_h);
+                        }
                         ImGui::Image((void *)(intptr_t)img_tex, display_size);
                     }
 
                     ImGui::Dummy(ImVec2(0.0f, 20.0f));
-                    if (ImGui::Button("Close", ImVec2(120, 0)))
+
+                    // CORRECT DeleteFile - use current_full_remote (REMOTE PATH)
+                    if (ImGui::Button("Close", ImVec2(80, 0)))
                     {
+                        std::remove(current_image_path.c_str());
                         show_image_popup = false;
                     }
                     ImGui::SameLine();
-                    if(ImGui::Button("Download"))
+                    if (ImGui::Button("Download", ImVec2(80, 0)))
                     {
-                        // download to current working directory
-                        std::string local_save = "./" + current_full_remote.substr(current_full_remote.find_last_of('/') + 1);
-                        if (DownloadFile(server_buf, share_buf, current_full_remote, downloadPath + "/" + local_save, username_buf, password_buf))
-                        {
-                            printf("Downloaded '%s' to '%s'\n", current_full_remote.c_str(), (downloadPath + "/" + local_save).c_str());
-                        }
-                        else
-                        {
-                            printf("Failed to download '%s'\n", current_full_remote.c_str());
-                        }
+                        DownloadFile(server_buf, share_buf, current_full_remote.c_str(), current_image_path.c_str(), username_buf, password_buf);
                     }
                     ImGui::EndPopup();
+                }
 
-                    // Cleanup texture when popup closes (do this in your cleanup/render loop)
-                    if (!show_image_popup && img_tex != 0)
-                    {
-                        glDeleteTextures(1, &img_tex);
-                        img_tex = 0;
-                        img_width = 0;
-                        img_height = 0;
-                        current_image_path.clear();
-                    }
+                // Cleanup AFTER popup
+                if (!show_image_popup && img_tex != 0)
+                {
+                    glDeleteTextures(1, &img_tex);
+                    img_tex = 0;
+                    img_width = 0;
+                    img_height = 0;
+                    current_image_path.clear();
+                    current_full_remote.clear();
                 }
                 // Rename modal
                 if (ImGui::BeginPopupModal("Alert!", NULL, ImGuiWindowFlags_AlwaysAutoResize))
