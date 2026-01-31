@@ -7,25 +7,55 @@
 #include <string>
 #include <cstdio>
 #include <cstring>
+extern char server_buf[64];
+extern char share_buf[64];
+extern char username_buf[64];
+extern char password_buf[64];
 
 std::string downloadPath = "";
 static char downloadPathBuffer[256] = "";
 // Config file handlers (for non-theme settings like download path)
 void SaveConfig(const char* path) {
     std::ofstream f(path);
-    if(!f) return;
-    downloadPath = downloadPathBuffer;  // sync from buffer to string
-    f << downloadPath << '\n';
-    f.close();
+    if (!f) return;
+
+    // sync string from buffer
+    downloadPath = downloadPathBuffer;
+
+    // one value per line; avoid spaces/newlines in values if possible
+    f << downloadPath   << '\n';
+    f << server_buf     << '\n';
+    f << share_buf      << '\n';
+    f << username_buf   << '\n';
+    f << password_buf   << '\n';
+    std::cout << server_buf << " " << share_buf << " " << username_buf << " " << password_buf << " " << std::endl;
 }
 
 void LoadConfig(const char* path) {
     std::ifstream f(path);
-    if(!f) return;
-    std::getline(f, downloadPath);
-    strncpy(downloadPathBuffer, downloadPath.c_str(), sizeof(downloadPathBuffer) - 1);
-    downloadPathBuffer[sizeof(downloadPathBuffer) - 1] = '\0';
-    f.close();
+    if (!f) return;
+
+    std::string line;
+
+    // downloadPath
+    if (std::getline(f, downloadPath)) {
+        std::strncpy(downloadPathBuffer, downloadPath.c_str(),
+                     sizeof(downloadPathBuffer) - 1);
+        downloadPathBuffer[sizeof(downloadPathBuffer) - 1] = '\0';
+    }
+
+    // helper lambda to read a line into a char buffer
+    auto read_into_buf = [&](char* buf, size_t buf_size) {
+        if (std::getline(f, line)) {
+            std::strncpy(buf, line.c_str(), buf_size - 1);
+            buf[buf_size - 1] = '\0';
+        }
+    };
+
+    read_into_buf(server_buf,   sizeof(server_buf));
+    read_into_buf(share_buf,    sizeof(share_buf));
+    read_into_buf(username_buf, sizeof(username_buf));
+    read_into_buf(password_buf, sizeof(password_buf));
 }
 
 void SaveStyle(const char* path){

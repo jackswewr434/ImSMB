@@ -28,12 +28,12 @@
 #include "images.h"
 #include "image_utils.h"
 //TODO MAKE THIS BE INTO A CONFIG 
-char server_buf[64] = "";
-char share_buf[64] = "";
-char username_buf[64] = "";
-char password_buf[64] = "";
 static std::vector<SMBFileInfo> file_list;
 static char current_path[512] = "";
+char server_buf[64]   = "";
+char share_buf[64]    = "";
+char username_buf[64] = "";
+char password_buf[64] = "";
 // bool tabs
 bool smbBrowsing = true;
 bool settingsTab = false;
@@ -331,6 +331,7 @@ if (ImGui::Button("Settings"))
             if (ImGui::Button("Connect"))
             {
                 strncpy(current_path, "", sizeof(current_path) - 1);
+                SaveConfig("config.cfg");
                 file_list = ListSMBFiles(server_buf, share_buf, "", username_buf, password_buf);
                 printf("Connected, found %zu files\n", file_list.size());
             }
