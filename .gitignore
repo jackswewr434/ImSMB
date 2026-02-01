@@ -9,3 +9,4 @@
 *.mov
 SMBViewer
 *.cfg
+.vscode/*

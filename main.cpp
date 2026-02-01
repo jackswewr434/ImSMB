@@ -749,6 +749,21 @@ int main()
                             pending_delete_open_popup = true;
                             ImGui::CloseCurrentPopup();
                         }
+                        if(ImGui::MenuItem("New Folder"))
+                        {
+                            bool created = CreateFolderInCurrent(server_buf, share_buf, current_path, username_buf, password_buf);
+                            if (created)
+                            {
+                                file_list = ListSMBFiles(server_buf, share_buf, current_path, username_buf, password_buf);
+                                printf("Created new folder in '%s'\n", current_path);
+                                ImGui::CloseCurrentPopup();
+                            }
+                            else
+                            {
+                                printf("Failed to create new folder in '%s'\n", current_path);
+                                ImGui::CloseCurrentPopup();
+                            }
+                        }
                         ImGui::EndPopup();
                     }
 
