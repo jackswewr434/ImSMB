@@ -7,7 +7,7 @@ An app for linux, for browsing and managing files on network drives. Easily uplo
 ## Features
 
 - **Browse Network Shares** - Navigate through files and folders on your SMB network drives just like a regular file explorer
-- **Upload Files** - Drag and drop files into the app to upload them to the network, or browse and select files manually
+- **Upload Files** - Drag and drop files into the app to upload them to the network
 - **Download Files** - Save files from the network to your computer with real-time progress tracking
 - **Manage Files** - Delete, rename, and organize files directly on the network share
 - **Custom Themes** - Change the look and feel of the app with a built-in theme editor
@@ -87,6 +87,7 @@ Each file operation (upload/download) generates:
 <img width="1287" height="828" alt="Screenshot_20260131_165207" src="https://github.com/user-attachments/assets/e02c4d38-1ec3-41bc-bae8-5c93edf01d61" />
 <break></break>
 <img width="1286" height="827" alt="Screenshot_20260131_165602" src="https://github.com/user-attachments/assets/1accb3ba-940a-4b94-ae1f-e2c69f3ffacf" />
+
 
 
 
