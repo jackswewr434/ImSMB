@@ -1,1 +1,1 @@
-g++ -std=c++17 -O2 -Wall -g   -Iimgui -I/usr/include/samba-4.0   main.cpp stb_image_impl.cpp stb_fallback.cpp imgui/*.cpp   -lglfw -lGL -lGLEW -ldl -lX11 -lXxf86vm -lXrandr -lpthread -lXi -lsmbclient -lzip  -o SMBViewer
+g++ -std=c++17 -O2 -Wall -g main.cpp stb_image_impl.cpp stb_fallback.cpp imgui/*.cpp -Iimgui -I./glew-2.2.0/include -I/usr/include/samba-4.0 -L./lib -lGLEW -Wl,-rpath,$(pwd)/lib -lglfw -lGL -ldl -lX11 -lXxf86vm -lXrandr -lpthread -lXi -lsmbclient -lzip -o SMBViewer
